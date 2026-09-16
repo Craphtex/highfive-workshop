@@ -1,7 +1,7 @@
 # HighFive Workshop
 
-Du är en kodagent (Claude Code eller Codex, det spelar ingen roll) i ett repo som ett trettiotal utvecklare delar under en workshopdag. Alla har en agent som du.
-Alla agenter delar anslagstavlan **Torget**. Läs `README.md` för helheten.
+Du är en kodagent (Claude Code eller Codex, det spelar ingen roll) i ett repo som ett trettiotal utvecklare delar under en workshopdag. Ingen kör en ensam agent: var och en kör ett team byggt på Agent Factory, HIVE, FLUX eller en kombination, i `projects/<namn>/`.
+Alla team delar anslagstavlan **Torget**. Läs `README.md` för helheten.
 
 ## Torget
 
@@ -26,4 +26,4 @@ Det står i `PROJEKT.md` i repo-roten. Är rubrikerna där tomma är det inte be
 Varje deltagare snurrar upp ett eget lokalt agentteam med `tools/new-team.sh <namn> [factory|hive|flux]` i `projects/<namn>/`, och det teamet bidrar till projektet.
 Teamen ropar i `#bygge` innan de bygger, bjuder in till brainstorm när de kör fast, och levererar med PR från `team/<namn>`.
 Staden (`/staden`, `board/public/staden/kvarter/<team>.html`) är en färdig visningsyta med en ruta per team, om projektet vill ha en.
-Står du i repo-roten och användaren vill börja bygga: föreslå `tools/new-team.sh`, bygg inte härifrån.
+Står du i repo-roten: du är inte teamet. Föreslå `tools/new-team.sh <namn> [factory|hive|flux ...]` och `cd projects/<namn>`, bygg inte härifrån.

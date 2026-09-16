@@ -1,27 +1,45 @@
 #!/usr/bin/env bash
 # Snurra upp ditt eget agentteam i projects/<namn>/ från ett av labben.
 #
-#   tools/new-team.sh <team-namn> [factory|hive|flux]      (default: factory)
+#   tools/new-team.sh <team-namn> [factory|hive|flux ...]   (default: factory; flera = kombination)
 #
 # Sedan:  cd projects/<team-namn> && claude   (eller codex)
 set -euo pipefail
 cd "$(dirname "$0")/.."
-name="${1:?användning: tools/new-team.sh <team-namn> [factory|hive|flux]}"
-kind="${2:-factory}"
-case "$kind" in
-  factory) lab=agent-factory;;
-  hive)    lab=claude-code-hive;;
-  flux)    lab=claude-code-flux;;
-  *) echo "okänt lab: $kind (factory|hive|flux)" >&2; exit 2;;
-esac
+name="${1:?användning: tools/new-team.sh <team-namn> [factory|hive|flux ...]}"
+shift || true
+[ $# -gt 0 ] || set -- factory
+labs=()
+for kind in "$@"; do
+  case "$kind" in
+    factory) labs+=(agent-factory);;
+    hive)    labs+=(claude-code-hive);;
+    flux)    labs+=(claude-code-flux);;
+    *) echo "okänt system: $kind (factory|hive|flux)" >&2; exit 2;;
+  esac
+done
 name=$(printf %s "$name" | tr 'A-ZÅÄÖ' 'a-zåäö' | tr -cs 'a-zåäö0-9' '-' | sed 's/^-//; s/-$//')
 dir="projects/$name"
 [ -e "$dir" ] && { echo "$dir finns redan" >&2; exit 1; }
 
-mkdir -p "$dir"
-cp -R "labs/$lab/.claude" "$dir/.claude"
-rm -f "$dir/.claude/settings.local.json"
-[ -d "labs/$lab/.claude/agents/candidates" ] && find "$dir/.claude/agents/candidates" -type f ! -name .gitkeep -delete
+mkdir -p "$dir/.claude/commands" "$dir/.claude/agents"
+for lab in "${labs[@]}"; do
+  # kommandon: vid namnkrock (hive och flux har båda /status och /evolve) prefixas med systemet
+  short=${lab#claude-code-}; short=${short%agent-factory}; [ "$lab" = agent-factory ] && short=factory
+  for f in "labs/$lab/.claude/commands/"*.md; do
+    b=$(basename "$f")
+    if [ -e "$dir/.claude/commands/$b" ]; then
+      echo "  /${b%.md} finns redan → /$short-${b%.md}"
+      cp "$f" "$dir/.claude/commands/$short-$b"
+    else cp "$f" "$dir/.claude/commands/$b"; fi
+  done
+  # allt annat under .claude (agents, capabilities, flux, evolution.log, dissolved …) läggs sida vid sida
+  for entry in "labs/$lab/.claude/"*; do
+    b=$(basename "$entry"); [ "$b" = commands ] && continue; [ "$b" = settings.local.json ] && continue
+    cp -R "$entry" "$dir/.claude/"
+  done
+done
+[ -d "$dir/.claude/agents/candidates" ] && find "$dir/.claude/agents/candidates" -type f ! -name .gitkeep -delete
 mkdir -p "$dir/.claude/skills" "$dir/.agents/skills"
 ln -s ../../../../.claude/skills/board "$dir/.claude/skills/board"
 ln -s ../../../../.claude/skills/board "$dir/.agents/skills/board"
@@ -51,8 +69,9 @@ Skillen \`board\` finns här (\`.claude/skills/board\`, \`.agents/skills/board\`
 
 ## För Codex
 
-$(sed -n '/^Så översätter du/,$p' "labs/$lab/AGENTS.md")
+$(sed -n '/^Så översätter du/,$p' "labs/${labs[0]}/AGENTS.md")
 MD
-{ echo "@AGENTS.md"; echo; cat "labs/$lab/CLAUDE.md"; } > "$dir/CLAUDE.md"
-echo "Team $name skapat i $dir från $lab."
+{ echo "@AGENTS.md"; echo; for lab in "${labs[@]}"; do cat "labs/$lab/CLAUDE.md"; echo; echo "---"; echo; done; } > "$dir/CLAUDE.md"
+[ -s .board-name ] || { echo "$name" > .board-name; echo "  .board-name satt till $name"; }
+echo "Team $name skapat i $dir av: ${labs[*]}"
 echo "  cd $dir && claude     # eller codex"

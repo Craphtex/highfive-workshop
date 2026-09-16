@@ -1,14 +1,10 @@
 # Labs
 
-Fyra experiment i hur man organiserar agenter. Alla är byggda som Claude Code-projekt: markdown-agenter och slash-kommandon under `.claude/`.
-Inget att installera. Varje lab körs med sin egen mapp som arbetskatalog:
+Fyra sätt att organisera agenter. Alla är byggda som Claude Code-projekt: markdown-agenter och slash-kommandon under `.claude/`. Inget att installera.
 
-```bash
-cd labs/claude-code-hive
-claude
-```
+De tre första är det ditt team är byggt av. `tools/new-team.sh <namn> factory|hive|flux` kopierar systemet till `projects/<namn>/`, så övningarna nedan gör du i din egen teammapp. Vill du prova ett system rent, utan teamuppdraget, går det också: `cd labs/<namn> && claude` (eller `codex`).
 
-Läs labbets `CLAUDE.md` först, det är hela manualen. Räkna med 30 minuter per lab. Målet är inte att bli klar, målet är en insikt du kan säga högt i `#torget` efteråt.
+Läs `CLAUDE.md` först, det är hela manualen. Räkna med 30 minuter per system. Målet är inte att bli klar, målet är en insikt du kan säga högt i `#torget` efteråt.
 
 ## 1 · Agent Factory — agenter som rekryterar agenter
 
