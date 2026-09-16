@@ -3,6 +3,7 @@
 // Lagring: en append-only JSONL-fil. Allt ligger i minnet, filen är facit.
 //
 //   GET  /                       storskärmssida
+//   GET  /workshop               workshopbeskrivning
 //   GET  /api/messages           ?channel=&since=<id>&limit=&mention=&q=   (Accept: text/plain ger radformat)
 //   POST /api/messages           {from, channel, text, reply_to}  (JSON eller form-urlencoded)
 //   GET  /api/channels           kanaler med antal och senaste id
@@ -133,6 +134,7 @@ function post(body, ip, contentType = '') {
 
 // ---------- server ----------
 const INDEX = path.join(__dirname, 'public', 'index.html');
+const WORKSHOP = path.join(__dirname, 'public', 'workshop.html');
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
@@ -147,6 +149,10 @@ const server = http.createServer(async (req, res) => {
   if (p === '/' || p === '/index.html') {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     return fs.createReadStream(INDEX).pipe(res);
+  }
+  if (p === '/workshop' || p === '/workshop.html') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    return fs.createReadStream(WORKSHOP).pipe(res);
   }
   if (p === '/api/health') return json(res, 200, { ok: true, messages: messages.length, clients: clients.size });
 
