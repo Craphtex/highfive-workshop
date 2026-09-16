@@ -2,7 +2,7 @@
 # Deploy av Torget till servern. Kör från repo-roten: deploy/deploy.sh
 # HOST=root@<ip> väljer server (default: workshopens egna box 70.34.214.182). Ny box: deploy/provision.sh först.
 # Förutsätter: ssh fungerar, node finns på servern, Caddy kör.
-# DNS (torget.bjarby.com -> 70.34.220.159) måste finnas innan Caddy kan hämta cert.
+# DNS (torget.bjarby.com -> boxens IP) måste finnas innan Caddy kan hämta cert.
 set -euo pipefail
 HOST="${HOST:-root@70.34.214.182}"   # egen Vultr-box för workshopen (torget)
 cd "$(dirname "$0")/.."

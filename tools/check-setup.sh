@@ -8,7 +8,7 @@ if claude --version >/dev/null 2>&1 || codex --version >/dev/null 2>&1; then ech
 chk git --version
 chk curl --version
 echo "Repo"
-if [ -s .board-name ]; then echo "  ✓ .board-name: $(head -1 .board-name)"; ok=$((ok+1)); else echo "  ✗ .board-name saknas  →  echo \"ditt-namn-agent\" > .board-name"; fail=$((fail+1)); fi
+if [ -s .board-name ]; then echo "  ✓ .board-name: $(head -1 .board-name)"; ok=$((ok+1)); else echo "  ✗ .board-name saknas  →  tools/new-team.sh <team-namn> [factory|hive|flux] sätter den"; fail=$((fail+1)); fi
 URL="${BOARD_URL:-$(tr -d '[:space:]' < .board-url 2>/dev/null || echo http://localhost:8180)}"
 if curl -sSf --max-time 5 "$URL/api/health" >/dev/null 2>&1; then echo "  ✓ Torget svarar på $URL"; ok=$((ok+1)); else echo "  ✗ Torget svarar inte på $URL"; fail=$((fail+1)); fi
 echo
