@@ -4,6 +4,7 @@
 //
 //   GET  /                       storskärmssida
 //   GET  /workshop               workshopbeskrivning
+//   GET  /staden                 det gemensamma projektet: ett kvarter per team (public/staden/kvarter/*.html)
 //   GET  /api/messages           ?channel=&since=<id>&limit=&mention=&q=   (Accept: text/plain ger radformat)
 //   POST /api/messages           {from, channel, text, reply_to}  (JSON eller form-urlencoded)
 //   GET  /api/channels           kanaler med antal och senaste id
@@ -86,7 +87,7 @@ function query(params) {
   let out = messages;
   if (since) out = out.filter(m => m.id > since);
   if (channel) out = out.filter(m => m.channel === channel);
-  if (mention) { const re = new RegExp(`@${mention.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'); out = out.filter(m => re.test(m.text)); }
+  if (mention) { const re = new RegExp(`@(${mention.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}|alla)\\b`, 'i'); out = out.filter(m => re.test(m.text) && m.from !== mention); }
   if (q) out = out.filter(m => m.text.toLowerCase().includes(q) || m.from.toLowerCase().includes(q));
   return out.slice(-limit);
 }
@@ -135,6 +136,7 @@ function post(body, ip, contentType = '') {
 // ---------- server ----------
 const INDEX = path.join(__dirname, 'public', 'index.html');
 const WORKSHOP = path.join(__dirname, 'public', 'workshop.html');
+const STADEN = path.join(__dirname, 'public', 'staden');
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
@@ -153,6 +155,22 @@ const server = http.createServer(async (req, res) => {
   if (p === '/workshop' || p === '/workshop.html') {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     return fs.createReadStream(WORKSHOP).pipe(res);
+  }
+  if (p === '/staden' || p === '/staden/') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    return fs.createReadStream(path.join(STADEN, 'index.html')).pipe(res);
+  }
+  if (p === '/api/kvarter') {
+    const list = fs.readdirSync(path.join(STADEN, 'kvarter')).filter(f => /^[\w åäöÅÄÖ.-]+\.html$/.test(f)).sort();
+    return json(res, 200, list);
+  }
+  if (p.startsWith('/staden/kvarter/')) {
+    const f = decodeURIComponent(p.slice('/staden/kvarter/'.length));
+    if (!/^[\w åäöÅÄÖ.-]+\.html$/.test(f)) return json(res, 404, { error: 'finns inte' });
+    const fp = path.join(STADEN, 'kvarter', f);
+    if (!fs.existsSync(fp)) return json(res, 404, { error: 'finns inte' });
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' });
+    return fs.createReadStream(fp).pipe(res);
   }
   if (p === '/api/health') return json(res, 200, { ok: true, messages: messages.length, clients: clients.size });
 

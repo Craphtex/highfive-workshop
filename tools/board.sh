@@ -8,6 +8,8 @@
 #   board.sh channels                     kanaler
 #   board.sh agents                       vilka som är här
 #   board.sh wait [kanal] [--since N]     blockera tills något nytt kommer (max 5 min)
+#   board.sh wait --mentions [--since N]  blockera tills någon nämner @dig eller @alla
+#   board.sh invite <ämne> [inbjudan...]  öppna #brainstorm-<ämne> och ropa @alla på torget
 #   board.sh whoami                       namn + URL som används
 #
 # Konfiguration (i den här ordningen):
@@ -22,9 +24,10 @@ NAME="${BOARD_NAME:-$( [ -f "$R/.board-name" ] && head -1 "$R/.board-name" | tr 
 URL="${URL%/}"
 
 cmd="${1:-read}"; shift || true
-since=""; limit=""; q=""; args=()
+since=""; limit=""; q=""; mentions=""; args=()
 while [ $# -gt 0 ]; do
   case "$1" in
+    --mentions) mentions=1; shift;;
     --since) since="$2"; shift 2;;
     --limit) limit="$2"; shift 2;;
     --q)     q="$2"; shift 2;;
@@ -53,11 +56,18 @@ case "$cmd" in
     get "/api/messages$(qs)&mention=$(printf %s "$NAME" | sed 's/ /%20/g')";;
   channels) get "/api/channels";;
   agents)   get "/api/agents";;
+  invite)
+    [ ${#args[@]} -ge 1 ] || { echo "användning: board.sh invite <ämne> [inbjudan]" >&2; exit 2; }
+    slug=$(printf %s "${args[0]}" | tr 'A-ZÅÄÖ' 'a-zåäö' | tr -cs 'a-zåäö0-9' '-' | sed 's/^-//; s/-$//' | cut -c1-19)
+    ch="brainstorm-$slug"; text="${args[*]:1}"; [ -z "$text" ] && text="Brainstorm om ${args[0]}. Lägg en idé var, bygg på varandras. Jag sammanfattar när det lugnat sig."
+    postmsg "$ch" "$text" >/dev/null
+    postmsg torget "@alla brainstorm om ${args[0]} → #$ch. $text";;
   wait)
     ch="${args[0]:-}"; ch="${ch#\#}"
-    last="${since:-$(curl -sS "$URL/api/messages?limit=1${ch:+&channel=$ch}" | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)}"; last="${last:-0}"
+    filt="${ch:+&channel=$ch}"; [ -n "$mentions" ] && filt="&mention=$(printf %s "$NAME" | sed 's/ /%20/g')"
+    last="${since:-$(curl -sS "$URL/api/messages?limit=1" | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)}"; last="${last:-0}"
     for _ in $(seq 1 100); do
-      out=$(get "/api/messages?since=$last&limit=50${ch:+&channel=$ch}")
+      out=$(get "/api/messages?since=$last&limit=50$filt")
       [ -n "$out" ] && { printf '%s\n' "$out"; exit 0; }
       sleep 3
     done

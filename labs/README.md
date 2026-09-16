@@ -14,7 +14,7 @@ Läs labbets `CLAUDE.md` först, det är hela manualen. Räkna med 30 minuter pe
 
 Två kärnagenter, CEO och HR. CEO intervjuar dig om vad du vill bygga, HR tar fram tre kandidater per roll (specialist, generalist, innovatör), du intervjuar och väljer. Vinnaren installeras i `.claude/agents/`. Alla agenter kan senare be HR om nya kollegor.
 
-**Övning:** `/start` och beskriv en invånare du vill bygga till Torget. Låt CEO rekrytera teamet. Titta på de tre kandidaterna för samma roll: vad skiljer dem, och vilken hade du aldrig skrivit själv?
+**Övning:** `/start` och beskriv ett kvarter du vill bygga i Staden. Låt CEO rekrytera teamet. Titta på de tre kandidaterna för samma roll: vad skiljer dem, och vilken hade du aldrig skrivit själv?
 
 **Kommandon:** `/start`, `/recruit`, `/team`. Nya agenter kräver omstart av Claude Code.
 
@@ -22,7 +22,7 @@ Två kärnagenter, CEO och HR. CEO intervjuar dig om vad du vill bygga, HR tar f
 
 Ingen CEO, ingen hierarki. Förmågor spawnar när de behövs, får energi när de används, tappar energi när de ligger stilla och löses upp under 10. Överlappande förmågor smälter samman, överbelastade splittras. Det som löses upp hamnar i `.claude/dissolved/` och kan återuppstå.
 
-**Övning:** `/awaken`, sedan `/spawn` två förmågor för samma invånare som i lab 1. Jobba lite, kör `/evolve` och se vad HIVE föreslår. Jämför med Agent Factory: vad förlorade du när rollerna försvann, vad vann du?
+**Övning:** `/awaken`, sedan `/spawn` två förmågor för samma kvarter som i lab 1. Jobba lite, kör `/evolve` och se vad HIVE föreslår. Jämför med Agent Factory: vad förlorade du när rollerna försvann, vad vann du?
 
 **Kommandon:** `/awaken`, `/spawn`, `/status`, `/evolve`, `/dissolve`.
 
@@ -30,7 +30,7 @@ Ingen CEO, ingen hierarki. Förmågor spawnar när de behövs, får energi när 
 
 Inga agenter alls. Genom (personlighetsgener som `aggressive`, `cautious`, `creative` plus domängener som `testing`, `security`) sätts ihop till tidslinjer som tävlar. Fitness avgör. Riskabla gener kräver skyddsgener. Kyrkogården minns *i vilken kontext* något dog, så samma gen kan vara dödlig för säkerhetskod och utmärkt för prototyper.
 
-**Övning:** `/explore "en invånare på Torget som ..."`. Titta på vilken kontext FLUX detekterar och vilka tidslinjer den forkar. Kör `/evolve` ett par generationer, `/cross` två lovande, `/select`. Läs vad som hamnade i kyrkogården och varför.
+**Övning:** `/explore "ett kvarter i Staden som ..."`. Titta på vilken kontext FLUX detekterar och vilka tidslinjer den forkar. Kör `/evolve` ett par generationer, `/cross` två lovande, `/select`. Läs vad som hamnade i kyrkogården och varför.
 
 **Kommandon:** `/explore`, `/evolve`, `/status`, `/cross`, `/select`, `/terminate`, `/resurrect`.
 

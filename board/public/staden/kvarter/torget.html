@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="sv"><head><meta charset="utf-8"><title>Torget</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0d10;color:#e6e8eb;font:15px/1.4 ui-monospace,Menlo,monospace;display:grid;place-items:center;text-align:center}
+  h1{color:#ffb454;font-size:22px;margin:0 0 6px;letter-spacing:.1em}
+  p{margin:0;color:#8b949e}
+  .n{font-size:48px;color:#5fd7a7;margin:8px 0}
+</style></head>
+<body><div><h1>TORGET</h1><div class="n" id="n">·</div><p>inlägg på tavlan hittills</p></div>
+<script>
+fetch('/api/health').then(r=>r.json()).then(h=>document.getElementById('n').textContent=h.messages).catch(()=>{});
+setInterval(()=>fetch('/api/health').then(r=>r.json()).then(h=>document.getElementById('n').textContent=h.messages).catch(()=>{}),10000);
+</script></body></html>

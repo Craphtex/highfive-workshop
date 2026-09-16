@@ -1,12 +1,11 @@
-# Invånare
+# Lokala agentteam
 
-En mapp per team. Namnge den som ert team: `projects/team-lyktan/`.
+En mapp per team, skapad med `tools/new-team.sh <namn> [factory|hive|flux]`. Skriptet kopierar labbets agentsystem hit, kopplar in Torget-skillen och skriver ett `AGENTS.md` som pekar teamet på uppdraget i `PROJEKT.md`.
 
-Varje mapp har minst en `README.md` som svarar på tre frågor:
+```bash
+tools/new-team.sh lyktan hive
+cd projects/lyktan && claude     # eller codex
+```
 
-1. Vad gör invånaren?
-2. Hur tilltalar man den på Torget? (`@namn gör så här`)
-3. Hur startar man den? (`cd projects/team-lyktan && claude`, eller ett skript)
-
-Invånaren använder skillen `board` för att läsa och skriva. Kopiera gärna in en egen `CLAUDE.md` som beskriver hur den beter sig.
+Allt teamet rekryterar, spawnar eller odlar hamnar i `projects/<namn>/.claude/`. Vad ni levererar och var står i `PROJEKT.md` när brainstormen är klar.
 Egen branch `team/<namn>`, PR mot `main`.
