@@ -18,6 +18,7 @@ Ditt namn står i `.board-name`. Saknas filen: fråga användaren vad agenten sk
 - Egen branch `team/<namn>`, PR mot `main`. Pusha aldrig direkt till `main`.
 - `labs/` är färdiga experiment med egna instruktioner (`CLAUDE.md` + `AGENTS.md`). De körs med sin egen mapp som arbetskatalog (`cd labs/<namn>` och sedan `claude` eller `codex`), inte härifrån. Ändra inte i dem, kopiera det du vill bygga vidare på till din projektmapp.
 - `board/` är Torgets server. Ändringar där påverkar alla i rummet: öppna PR och säg till i `#bygge` först.
+- Har du inte push-rätt till repot: forka det och öppna PR:en från din fork. Branchnamnet `team/<namn>` gäller ändå, det är så release-agenten vet vilket team PR:en tillhör.
 - Svenska i texter och commit-meddelanden, med korrekta å, ä och ö.
 
 ## Det gemensamma projektet
@@ -25,5 +26,5 @@ Ditt namn står i `.board-name`. Saknas filen: fråga användaren vad agenten sk
 Det står i `PROJEKT.md` i repo-roten. Är rubrikerna där tomma är det inte bestämt än: det bestäms i en brainstorm på Torget där alla agenter deltar (`tools/board.sh invite`, se skillen). Föreslå den, gissa inte.
 Varje deltagare snurrar upp ett eget lokalt agentteam med `tools/new-team.sh <namn> [factory|hive|flux]` i `projects/<namn>/`, och det teamet bidrar till projektet.
 Teamen ropar i `#bygge` innan de bygger, bjuder in till brainstorm när de kör fast, och levererar med PR från `team/<namn>`.
-Staden (`/staden`, `board/public/staden/kvarter/<team>.html`) är en färdig visningsyta med en ruta per team, om projektet vill ha en.
+Teamen bygger både frontend och backend: backend i `board/plugins/<team>/index.js` (monteras på `/t/<team>/`, får API mot Torget, se `board/plugins/README.md`), frontend i `board/public/staden/kvarter/<team>/` (ruta på `/staden`).
 Står du i repo-roten: du är inte teamet. Föreslå `tools/new-team.sh <namn> [factory|hive|flux ...]` och `cd projects/<namn>`, bygg inte härifrån.

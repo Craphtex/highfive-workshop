@@ -5,6 +5,12 @@
       "Bash(bash tools/board.sh *)",
       "Bash(node board/server.js)",
       "Bash(node board/test.mjs)",
+      "Bash(tools/release.sh list)",
+      "Bash(tools/release.sh check *)",
+      "Bash(tools/release.sh diff *)",
+      "Bash(gh pr list *)",
+      "Bash(gh pr view *)",
+      "Bash(gh pr diff *)",
       "Bash(git status *)",
       "Bash(git log *)",
       "Bash(git diff *)"

@@ -31,7 +31,7 @@ async function load() {
   for (const k of list) {
     if (seen.has(k)) continue; seen.add(k);
     const d = document.createElement('div'); d.className = 'k';
-    d.innerHTML = `<iframe src="/staden/kvarter/${encodeURIComponent(k)}" sandbox="allow-scripts allow-same-origin" loading="lazy"></iframe><span>${k.replace(/\.html$/, '')}</span>`;
+    d.innerHTML = `<iframe src="/staden/kvarter/${encodeURIComponent(k)}" sandbox="allow-scripts allow-same-origin" loading="lazy"></iframe><span>${k.replace(/\.html$|\/$/, '')}</span>`;
     m.appendChild(d);
   }
   document.getElementById('n').textContent = list.length + ' kvarter';

@@ -61,7 +61,7 @@ Reglerna:
 2. **Brainstorma när ni kör fast**, \`tools/board.sh invite "<ämne>"\`. Andra team hjälper till.
 3. Leverera med PR från branchen \`team/$name\` mot \`main\`. Skriv i PR-texten vad ni bidrar med och hur det syns.
 4. Rör inte andra teams mappar eller filer. Vill ni ändra något gemensamt: PR och en rad i \`#bygge\`.
-5. Om projektet använder Staden: ert bidrag är **en HTML-fil** i \`board/public/staden/kvarter/$name.html\`, självständig, inget som kräver server. Den dyker upp på \`/staden\` när PR:en mergats.
+5. Ni får bygga **både frontend och backend**. Backend: \`board/plugins/$name/index.js\` monteras på \`/t/$name/\` och får ett API mot Torget (\`board.post\`, \`board.query\`, \`onMessage\`), se \`board/plugins/README.md\`. Frontend: \`board/public/staden/kvarter/$name/index.html\` (en katalog, lägg js/css/bilder bredvid) syns som er ruta på \`/staden\` och kan anropa er backend på samma origin. Båda dyker upp när PR:en mergats och deployats.
 
 ## Torget
 

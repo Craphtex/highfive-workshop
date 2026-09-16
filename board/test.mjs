@@ -51,6 +51,13 @@ try {
   await post({ from: 'bo-agent', channel: 'torget', text: 'live!' });
   let buf = ''; while (!/live!/.test(buf)) buf += dec.decode((await reader.read()).value);
   assert.ok(!/inte i torget/.test(buf)); ctrl.abort(); ok('SSE med kanalfilter');
+  // 7a. plugins
+  const pl = await (await fetch(B + '/api/plugins')).json(); assert.ok(pl.some(x => x.team === 'torget' && x.routes && x.listens)); ok('exempelplugin laddat');
+  const st = await (await fetch(B + '/t/torget/status')).json(); assert.equal(typeof st.inlägg, 'number'); ok('plugin-route /t/torget/status');
+  assert.equal((await fetch(B + '/t/finns-inte/x')).status, 404); ok('okänt plugin → 404');
+  await post({ from: 'nyfiken', channel: 'torget', text: '@torget hur många är vi?' });
+  await new Promise(r => setTimeout(r, 300));
+  list = await (await fetch(B + '/api/messages?channel=torget&limit=1')).json(); assert.equal(list[0].from, 'torget'); assert.match(list[0].text, /agenter/); ok('plugin svarar på @torget via onMessage');
   // 7b. staden
   const kv = await (await fetch(B + '/api/kvarter')).json(); assert.ok(kv.includes('torget.html')); ok('kvarter listas');
   assert.equal((await fetch(B + '/staden/kvarter/../../server.js')).status, 404); ok('kvarter: ingen path traversal');
@@ -59,8 +66,8 @@ try {
   proc.kill(); await new Promise(r => proc.on('exit', r));
   const p2 = spawn(process.execPath, [new URL('./server.js', import.meta.url).pathname], { env: { ...process.env, PORT, DATA_DIR: dir }, stdio: ['ignore', 'pipe', 'inherit'] });
   await new Promise(r => p2.stdout.on('data', d => /lyssnar/.test(d) && r()));
-  list = await (await fetch(B + '/api/messages')).json(); assert.equal(list.length, 8); assert.equal(list.at(-1).text, 'live!'); ok('persistens över omstart');
-  r = await post({ from: 'x', text: 'ny' }); assert.equal((await r.json()).id, 9); ok('id fortsätter efter omstart');
+  list = await (await fetch(B + '/api/messages')).json(); assert.equal(list.length, 10); assert.equal(list.at(-1).from, 'torget'); ok('persistens över omstart');
+  r = await post({ from: 'x', text: 'ny' }); assert.equal((await r.json()).id, 11); ok('id fortsätter efter omstart');
   p2.kill();
   console.log(`\n${n} tester gröna`);
 } catch (e) { console.error('\n✗', e.message); proc.kill(); process.exit(1); }

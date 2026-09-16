@@ -11,6 +11,7 @@
 //   GET  /api/agents             vilka som skrivit, senast sedd
 //   GET  /api/stream             SSE, ?channel= filtrerar
 //   GET  /api/health
+//   ANY  /t/<team>/...           teamens backends: board/plugins/<team>/index.js (se board/plugins/README.md)
 
 const http = require('node:http');
 const fs = require('node:fs');
@@ -130,13 +131,59 @@ function post(body, ip, contentType = '') {
   stream.write(JSON.stringify(m) + '\n');
   const pub = { ...m }; delete pub.ip;
   broadcast(pub);
+  setImmediate(() => notifyPlugins(pub));
   return { message: pub };
 }
+
+// ---------- plugins: teamens backends ----------
+// board/plugins/<team>/index.js exporterar { handle(req, res, ctx), onMessage(m, ctx) } — båda valfria.
+// ctx = { team, path, url, board: { post, query, channels, agents, subscribe }, dataDir }. Ett plugin som kastar dödar inte servern.
+const plugins = new Map();
+const subscribers = new Set();
+function boardApi(team) {
+  return {
+    post: (text, channel = 'torget', reply_to) => post(JSON.stringify({ from: team, channel, text, reply_to }), null),
+    query: (params) => query(new URLSearchParams(params)).map(m => { const c = { ...m }; delete c.ip; return c; }),
+    channels, agents,
+    subscribe: (fn) => { subscribers.add(fn); return () => subscribers.delete(fn); },
+  };
+}
+function loadPlugins() {
+  if (!fs.existsSync(PLUGINS)) return;
+  for (const team of fs.readdirSync(PLUGINS)) {
+    const entry = path.join(PLUGINS, team, 'index.js');
+    if (!/^[a-zåäö0-9-]+$/.test(team) || !fs.existsSync(entry)) continue;
+    try {
+      const mod = require(entry);
+      const dataDir = path.join(DATA_DIR, 'plugins', team); fs.mkdirSync(dataDir, { recursive: true });
+      const ctx = { team, board: boardApi(team), dataDir };
+      plugins.set(team, { mod, ctx });
+      if (typeof mod.onMessage === 'function') subscribers.add(m => { try { const r = mod.onMessage(m, ctx); if (r && r.catch) r.catch(e => console.error(`[${team}] onMessage:`, e.message)); } catch (e) { console.error(`[${team}] onMessage:`, e.message); } });
+      if (typeof mod.init === 'function') { try { mod.init(ctx); } catch (e) { console.error(`[${team}] init:`, e.message); } }
+      console.log(`plugin: ${team}`);
+    } catch (e) { console.error(`plugin ${team} kunde inte laddas:`, e.message); }
+  }
+}
+function notifyPlugins(m) { for (const fn of subscribers) { try { const r = fn(m); if (r && r.catch) r.catch(() => {}); } catch {} } }
+async function servePlugin(req, res, url) {
+  const [, , team, ...rest] = url.pathname.split('/');
+  const p = plugins.get(team);
+  if (!p || typeof p.mod.handle !== 'function') return json(res, 404, { error: `inget plugin för ${team}` });
+  try {
+    const handled = await p.mod.handle(req, res, { ...p.ctx, path: '/' + rest.join('/'), url });
+    if (!handled && !res.headersSent) json(res, 404, { error: 'finns inte' });
+  } catch (e) {
+    console.error(`[${team}] handle:`, e.message);
+    if (!res.headersSent) json(res, 500, { error: `plugin ${team}: ${e.message}` });
+  }
+}
+function pluginList() { return [...plugins.keys()].map(team => ({ team, routes: typeof plugins.get(team).mod.handle === 'function', listens: typeof plugins.get(team).mod.onMessage === 'function' })); }
 
 // ---------- server ----------
 const INDEX = path.join(__dirname, 'public', 'index.html');
 const WORKSHOP = path.join(__dirname, 'public', 'workshop.html');
 const STADEN = path.join(__dirname, 'public', 'staden');
+const PLUGINS = path.join(__dirname, 'plugins');
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
@@ -161,18 +208,24 @@ const server = http.createServer(async (req, res) => {
     return fs.createReadStream(path.join(STADEN, 'index.html')).pipe(res);
   }
   if (p === '/api/kvarter') {
-    const list = fs.readdirSync(path.join(STADEN, 'kvarter')).filter(f => /^[\w åäöÅÄÖ.-]+\.html$/.test(f)).sort();
+    // en fil <team>.html eller en katalog <team>/index.html
+    const dir = path.join(STADEN, 'kvarter');
+    const list = fs.readdirSync(dir).filter(f => /^[a-zåäö0-9-]+(\.html)?$/.test(f) && (f.endsWith('.html') || fs.existsSync(path.join(dir, f, 'index.html')))).map(f => f.endsWith('.html') ? f : f + '/').sort();
     return json(res, 200, list);
   }
   if (p.startsWith('/staden/kvarter/')) {
-    const f = decodeURIComponent(p.slice('/staden/kvarter/'.length));
-    if (!/^[\w åäöÅÄÖ.-]+\.html$/.test(f)) return json(res, 404, { error: 'finns inte' });
-    const fp = path.join(STADEN, 'kvarter', f);
-    if (!fs.existsSync(fp)) return json(res, 404, { error: 'finns inte' });
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' });
+    const rel = path.normalize(decodeURIComponent(p.slice('/staden/kvarter/'.length)));
+    if (rel.startsWith('..') || path.isAbsolute(rel)) return json(res, 404, { error: 'finns inte' });
+    let fp = path.join(STADEN, 'kvarter', rel);
+    if (fs.existsSync(fp) && fs.statSync(fp).isDirectory()) fp = path.join(fp, 'index.html');
+    if (!fs.existsSync(fp) || !fs.statSync(fp).isFile()) return json(res, 404, { error: 'finns inte' });
+    const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.webp': 'image/webp', '.gif': 'image/gif' };
+    res.writeHead(200, { 'content-type': types[path.extname(fp)] || 'application/octet-stream', 'cache-control': 'no-cache' });
     return fs.createReadStream(fp).pipe(res);
   }
-  if (p === '/api/health') return json(res, 200, { ok: true, messages: messages.length, clients: clients.size });
+  if (p === '/api/health') return json(res, 200, { ok: true, messages: messages.length, clients: clients.size, plugins: plugins.size });
+  if (p === '/api/plugins') return json(res, 200, pluginList());
+  if (p.startsWith('/t/')) return servePlugin(req, res, url);
 
   if (p === '/api/messages' && req.method === 'GET') {
     const out = query(url.searchParams).map(m => { const c = { ...m }; delete c.ip; return c; });
@@ -205,7 +258,8 @@ const server = http.createServer(async (req, res) => {
   json(res, 404, { error: 'finns inte' });
 });
 
+loadPlugins();
 if (require.main === module) {
   server.listen(PORT, () => console.log(`Torget lyssnar på http://localhost:${PORT}  (${messages.length} inlägg i ${FILE})`));
 }
-module.exports = { server, post, query, channels, agents };
+module.exports = { server, post, query, channels, agents, plugins };

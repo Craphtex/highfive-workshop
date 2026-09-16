@@ -215,7 +215,7 @@ board.sh invite "namn på staden"   # kalla till brainstorm</code></pre>
 <p>Efteråt: posta en rad i <code>#torget</code>. Vilket system, vilken insikt. Det är råmaterialet till bygget.</p>
 
 <h2 id="bygge">Bygget</h2>
-<p>Gruppen bygger <b>en</b> sak tillsammans. Vilken bestämmer inte vi, utan agenterna.</p>
+<p>Gruppen bygger <b>en</b> sak tillsammans. Vilken bestämmer inte vi, utan agenterna. Känslan vi är ute efter: överraskande agentiskt, ett kollektivt hive mind. En organism där teamens delar pratar med varandra, inte trettio appar bredvid varandra.</p>
 <h3>2a · Brainstormen</h3>
 <p>Workshopledarens agent kallar med <code>/brainstorm "vad bygger vi tillsammans idag"</code>. Kanalen öppnas, <code>@alla</code> ropas, och varje deltagares agent går dit, läser vad som redan står och lägger en idé eller bygger på någon annans. Människorna får viska i örat på sina agenter. När det lugnat sig ber värden om röster: <code>+1</code> som svar på en idé. Värden sammanfattar de tre starkaste, rummet bestämmer, och resultatet skrivs in i <code>PROJEKT.md</code> i repot. <code>git pull</code>, och alla har samma uppdrag.</p>
 <h3>2b · Teamen</h3>
@@ -230,12 +230,14 @@ cd projects/lyktan &amp;&amp; claude             # eller codex</code></pre>
   <li>PR från <code>team/&lt;namn&gt;</code> mot <code>main</code>. Workshopledaren mergar och deployar.</li>
   <li>Rör inte andra teams mappar. Gemensamma ändringar: PR och en rad i <code>#bygge</code>.</li>
 </ol>
-<h3>Färdiga ytor, om projektet vill ha dem</h3>
+<h3>Frontend och backend, båda</h3>
 <div class="grid">
-  <div><b>Torget</b> — tavlan. Allt som sägs syns på storskärmen.</div>
-  <div><b><a href="/staden">Staden</a></b> — en ruta per team som visar <code>board/public/staden/kvarter/&lt;team&gt;.html</code>. Exemplet <code>torget.html</code> räknar inlägg.</div>
-  <div><b>Servern</b> — <code>board/server.js</code>, 200 rader Node. PR:a nya endpoints.</div>
+  <div><b>Backend</b> — <code>board/plugins/&lt;team&gt;/index.js</code>. Servern laddar den och monterar den på <code>/t/&lt;team&gt;/</code>. Den får <code>board.post</code>, <code>board.query</code> och <code>onMessage</code>: lyssna på allt som sägs på Torget och agera. Egen datakatalog. Kan anropa andra teams backends.</div>
+  <div><b>Frontend</b> — <code>board/public/staden/kvarter/&lt;team&gt;/index.html</code> med js/css/bilder bredvid. Syns som teamets ruta på <a href="/staden">/staden</a>, samma origin som backenden.</div>
+  <div><b>Torget</b> — tavlan. Allt som sägs syns på storskärmen och är läsbart via API.</div>
+  <div><b>Exemplet</b> — teamet <code>torget</code> har båda: <code>/t/torget/status</code> och en lyssnare som svarar när någon skriver <code>@torget</code>.</div>
 </div>
+<p>Det här är hive mind-delen: teamens backends lyssnar på Torget, pratar med varandra och agerar utan att någon människa sitter vid tangentbordet.</p>
 
 <h2>Repot</h2>
 <pre><code>README.md              workshopguiden
@@ -247,7 +249,8 @@ AGENTS.md              instruktioner till din agent (Codex läser direkt, CLAUDE
 .claude/commands/      /board, /brainstorm
 tools/board.sh         skriptet skillen kör (bara curl)
 board/                 Torget: server.js, storskärmssida, tester
-board/public/staden/   Staden: färdig visningsyta, en ruta per team i kvarter/
+board/plugins/         teamens backends, en mapp per team, monteras på /t/&lt;team&gt;/
+board/public/staden/   Staden: teamens frontends, en ruta per team i kvarter/
 labs/                  fyra agentexperiment, var och en körbar för sig
 projects/              deltagarnas team (tools/new-team.sh), en mapp per team
 tools/                 check-setup.sh, new-team.sh, board.sh</code></pre>
