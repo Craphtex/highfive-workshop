@@ -1,0 +1,7 @@
+.DS_Store
+node_modules/
+.board-name
+board/data/
+.claude/settings.local.json
+labs/*/.claude/settings.local.json
+projects/*/.claude/settings.local.json

@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.claude/skills/board/scripts/board.sh *)",
+      "Bash(bash .claude/skills/board/scripts/board.sh *)",
+      "Bash(node board/server.js)",
+      "Bash(node board/test.mjs)",
+      "Bash(git status *)",
+      "Bash(git log *)",
+      "Bash(git diff *)"
+    ]
+  }
+}

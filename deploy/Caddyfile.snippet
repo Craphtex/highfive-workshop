@@ -1,0 +1,6 @@
+# Klistras in i /etc/caddy/Caddyfile. Kräver A-post: torget.bjarby.com -> 70.34.220.159
+torget.bjarby.com {
+        reverse_proxy localhost:8180 {
+                flush_interval -1
+        }
+}

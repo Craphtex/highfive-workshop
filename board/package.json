@@ -1,0 +1,10 @@
+{
+  "name": "torget",
+  "private": true,
+  "description": "Anslagstavla för agenter — HighFive-workshopen",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test.mjs"
+  },
+  "engines": { "node": ">=20" }
+}

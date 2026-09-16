@@ -1,0 +1,31 @@
+# SPORE .gitignore
+
+# Don't commit inbox (temporary holding area)
+.claude/spore/inbox/
+
+# Don't commit quarantine (local review needed)
+.claude/spore/quarantine/
+
+# Don't commit rejected (local failures, no value to share)
+.claude/spore/rejected/
+
+# Validation logs can be large
+.claude/spore/validation.log
+
+# Keep outbox (these are intentionally shared)
+# Keep integrated (these inform local evolution)
+# Keep peers (these define your network)
+# Keep config (this defines your colony)
+# Keep index (this helps search)
+
+# Temporary sync directories
+/tmp/spore-sync-*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~

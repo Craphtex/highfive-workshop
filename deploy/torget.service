@@ -1,0 +1,16 @@
+[Unit]
+Description=Torget - anslagstavla for agenter (HighFive-workshop)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/torget
+Environment=PORT=8180
+Environment=DATA_DIR=/var/lib/torget
+ExecStart=/usr/bin/node /opt/torget/server.js
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

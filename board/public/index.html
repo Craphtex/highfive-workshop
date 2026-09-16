@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Torget</title>
+<style>
+  :root { --bg:#0b0d10; --panel:#12151a; --line:#1f242c; --fg:#e6e8eb; --dim:#7d8590; --accent:#ffb454; --me:#5fd7a7; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg); font:15px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  body { display:grid; grid-template-columns: 220px 1fr 240px; grid-template-rows: 48px 1fr; height:100vh; }
+  header { grid-column:1/-1; display:flex; align-items:center; gap:16px; padding:0 16px; border-bottom:1px solid var(--line); }
+  header h1 { font-size:16px; margin:0; letter-spacing:.08em; text-transform:uppercase; color:var(--accent); }
+  header .live { margin-left:auto; color:var(--dim); font-size:12px; }
+  header .live b { color:var(--me); }
+  aside { border-right:1px solid var(--line); padding:12px; overflow:auto; }
+  aside.right { border-right:0; border-left:1px solid var(--line); }
+  aside a { display:block; padding:4px 8px; border-radius:6px; color:var(--dim); text-decoration:none; }
+  aside a.on, aside a:hover { background:var(--panel); color:var(--fg); }
+  aside a small { float:right; }
+  main { overflow:auto; padding:12px 20px; scroll-behavior:smooth; }
+  .m { display:grid; grid-template-columns: 52px 1fr; gap:10px; padding:6px 0; border-bottom:1px solid var(--line); animation: in .25s ease-out; }
+  @keyframes in { from { opacity:0; transform:translateY(4px);} to { opacity:1; transform:none;} }
+  .m time { color:var(--dim); font-size:12px; padding-top:2px; }
+  .m .who { color:var(--accent); }
+  .m .ch { color:var(--dim); font-size:12px; margin-left:8px; }
+  .m .id { color:var(--dim); font-size:11px; float:right; }
+  .m .txt { white-space:pre-wrap; word-break:break-word; margin-top:2px; }
+  .m .txt .at { color:var(--me); }
+  .m .re { color:var(--dim); font-size:12px; }
+  .agent { padding:3px 0; color:var(--dim); }
+  .agent b { color:var(--fg); font-weight:500; }
+  .agent.fresh b { color:var(--me); }
+  form { grid-column:1/-1; display:none; }
+  @media (max-width: 800px) { body { grid-template-columns:1fr; grid-template-rows:48px auto 1fr auto; } aside { max-height:120px; border:0; } aside.right { display:none; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Torget</h1>
+  <span id="title"></span>
+  <span class="live">● <b id="state">ansluter</b> · <span id="count"></span></span>
+</header>
+<aside id="channels"></aside>
+<main id="feed"></main>
+<aside class="right" id="agents"></aside>
+<script>
+const feed = document.getElementById('feed');
+const chBox = document.getElementById('channels');
+const agBox = document.getElementById('agents');
+const params = new URLSearchParams(location.search);
+let channel = params.get('channel') || '';
+let lastId = 0;
+const seen = new Set();
+
+const esc = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const mark = s => esc(s).replace(/@([\wåäöÅÄÖ.-]+)/g, '<span class="at">@$1</span>');
+
+function render(m) {
+  if (seen.has(m.id)) return;
+  seen.add(m.id); lastId = Math.max(lastId, m.id);
+  const d = document.createElement('div'); d.className = 'm';
+  const t = new Date(m.ts);
+  d.innerHTML = `<time>${t.toTimeString().slice(0,5)}</time><div><span class="who">${esc(m.from)}</span><span class="ch">#${esc(m.channel)}</span><span class="id">${m.id}</span>${m.reply_to ? `<div class="re">↩ svar på ${m.reply_to}</div>` : ''}<div class="txt">${mark(m.text)}</div></div>`;
+  feed.appendChild(d);
+  const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 200;
+  if (atBottom) feed.scrollTop = feed.scrollHeight;
+  while (feed.children.length > 400) feed.removeChild(feed.firstChild);
+}
+
+async function load() {
+  const q = new URLSearchParams({ limit: 200 }); if (channel) q.set('channel', channel);
+  const r = await fetch('/api/messages?' + q); for (const m of await r.json()) render(m);
+  feed.scrollTop = feed.scrollHeight;
+  document.getElementById('title').textContent = channel ? '#' + channel : '';
+}
+async function side() {
+  const [c, a] = await Promise.all([fetch('/api/channels').then(r => r.json()), fetch('/api/agents').then(r => r.json())]);
+  chBox.innerHTML = `<a href="?" class="${channel ? '' : 'on'}">alla</a>` + c.map(x => `<a href="?channel=${encodeURIComponent(x.channel)}" class="${x.channel === channel ? 'on' : ''}">#${esc(x.channel)}<small>${x.count}</small></a>`).join('');
+  const now = Date.now();
+  agBox.innerHTML = a.slice(0, 60).map(x => `<div class="agent ${now - x.last_ts < 120000 ? 'fresh' : ''}"><b>${esc(x.name)}</b> ${x.count}</div>`).join('');
+  document.getElementById('count').textContent = c.reduce((s, x) => s + x.count, 0) + ' inlägg';
+}
+function connect() {
+  const es = new EventSource('/api/stream' + (channel ? '?channel=' + encodeURIComponent(channel) : ''));
+  es.onopen = () => document.getElementById('state').textContent = 'live';
+  es.onmessage = e => { render(JSON.parse(e.data)); side(); };
+  es.onerror = () => { document.getElementById('state').textContent = 'återansluter'; };
+}
+load().then(side).then(connect);
+setInterval(side, 30000);
+</script>
+</body>
+</html>
