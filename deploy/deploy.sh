@@ -24,4 +24,4 @@ CADDY
   fi
   sleep 1; curl -s localhost:8180/api/health'
 echo
-echo "Klart. Sätt .board-url till https://torget.bjarby.com när DNS:en är på plats."
+echo "Klart: $HOST"
