@@ -30,9 +30,9 @@
   #topp .rek { margin-left:auto; } #topp .rek b { color:var(--me); } #topp .rek i { font-style:normal; color:var(--fg); }
   /* kedjorna: linjer mellan rutor när ett kvarter reagerar på ett annat */
   #trådar { position:absolute; left:0; top:0; width:100%; pointer-events:none; z-index:4; overflow:visible; }
-  #trådar path { fill:none; stroke:var(--accent); stroke-width:2.5; stroke-linecap:round; filter:drop-shadow(0 0 6px rgba(255,180,84,.7)); stroke-dasharray:1; stroke-dashoffset:1; animation: dra 1.1s ease-out forwards, tona 5s ease-in 1.1s forwards; }
-  #trådar circle { fill:var(--accent); animation: tona 5s ease-in 1.1s forwards; }
-  #trådar text { fill:var(--fg); font:12px ui-monospace, Menlo, monospace; paint-order:stroke; stroke:var(--bg); stroke-width:4px; animation: tona 5s ease-in 1.1s forwards; }
+  #trådar path { fill:none; stroke:var(--accent); stroke-width:2.5; stroke-linecap:round; filter:drop-shadow(0 0 6px rgba(255,180,84,.7)); stroke-dasharray:1; stroke-dashoffset:1; animation: dra 1.1s ease-out forwards, tona 4s ease-in 4s forwards; }
+  #trådar circle { fill:var(--accent); animation: tona 4s ease-in 4s forwards; }
+  #trådar text { fill:var(--fg); font:12px ui-monospace, Menlo, monospace; paint-order:stroke; stroke:var(--bg); stroke-width:4px; animation: tona 4s ease-in 4s forwards; }
   @keyframes dra { to { stroke-dashoffset:0; } } @keyframes tona { to { opacity:0; } }
 
   /* kvarteren: två kolumner på en vanlig skärm, rutan växer med sitt innehåll upp till ett tak */
@@ -137,12 +137,15 @@ function tråd(från, till, typ) {
   if (document.querySelector('.k.stor')) return;
   trådar.style.height = document.documentElement.scrollHeight + 'px';
   const a = mitt(från), b = mitt(till); if (Math.hypot(a.x - b.x, a.y - b.y) < 8) return;
-  const mx = (a.x + b.x) / 2, my = Math.min(a.y, b.y) - 60 - Math.abs(a.x - b.x) * .08;
+  const dx = Math.abs(a.x - b.x), dy = Math.abs(a.y - b.y);
+  // samma kolumn: bågen går ut åt sidan i stället för rakt över innehållet
+  const mx = dx < 80 ? (a.x + b.x) / 2 + Math.min(260, 90 + dy * .35) * (a.x > innerWidth / 2 ? -1 : 1) : (a.x + b.x) / 2;
+  const my = dx < 80 ? (a.y + b.y) / 2 : Math.min(a.y, b.y) - 60 - dx * .08;
   const ns = 'http://www.w3.org/2000/svg', g = document.createElementNS(ns, 'g');
   const path = document.createElementNS(ns, 'path'); path.setAttribute('d', `M${a.x},${a.y} Q${mx},${my} ${b.x},${b.y}`); path.setAttribute('pathLength', '1');
   const c = document.createElementNS(ns, 'circle'); c.setAttribute('cx', b.x); c.setAttribute('cy', b.y); c.setAttribute('r', 5);
-  const t = document.createElementNS(ns, 'text'); t.setAttribute('x', mx); t.setAttribute('y', (a.y + b.y) / 2 * .5 + my * .5 - 4); t.setAttribute('text-anchor', 'middle'); t.textContent = typ;
-  g.append(path, c, t); trådar.appendChild(g); setTimeout(() => g.remove(), 6300);
+  const t = document.createElementNS(ns, 'text'); t.setAttribute('x', (a.x + b.x) / 4 + mx / 2); t.setAttribute('y', (a.y + b.y) / 4 + my / 2 - 6); t.setAttribute('text-anchor', 'middle'); t.textContent = typ;
+  g.append(path, c, t); trådar.appendChild(g); setTimeout(() => g.remove(), 8200);
 }
 
 // pulsremsan
