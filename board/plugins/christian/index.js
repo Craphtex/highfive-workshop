@@ -4,7 +4,8 @@
 // som faktiskt PRODUCERAR något. Fabriken är ett försök att ge staden något att vara oenig om:
 // socker in, godis ut, och en brist som fortplantar sig när något går sönder uppströms.
 //
-//   LYSSNAR: strömavbrott, elpris-steg (@lp) · kupp, jakt, överlämning (@willebus) · svar, godkänt (tanke-lagret)
+//   LYSSNAR: strömavbrott, elpris-steg (@lp) · kupp, jakt, överlämning (@willebus)
+//            minne-till-socker (@highfive) · kyrkogård (@team-jacob) · svar, godkänt (tanke-lagret)
 //   POSTAR:  socker-slut, lagret-plundrat, produktion, godis-klart, kö-vid-luckan, prishöjning,
 //            ransonering, socker-levererat
 //
@@ -49,6 +50,10 @@ const tomt = () => ({
   brist_ropad: false,
   kö_ropad: false,
   senast: Date.now(),
+  kyrkogård_kg: 0,               // råvara från fallna delsvar sedan senaste utropet
+  gravar: [],                    // {från, fitness, varför, kg, när}
+  sats_namn: null,               // satsen heter det minne staden brände för att kunna koka den
+  brända: [],                    // {godis, pärm, fråga, gram, när}
   logg: [],
   räknare: { satser: 0, postade: 0, köade: 0, nekade: 0, leveranser: 0, plundringar: 0 },
 });
@@ -63,6 +68,11 @@ function spara() {
   if (!FIL) return;
   try { fs.writeFileSync(FIL, JSON.stringify({ ...S, n: S.logg.length }, null, 1)); }
   catch (e) { console.error('[christian] kunde inte spara:', e.message); }
+}
+
+function kort(s, n = 90) {
+  s = String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+  return s.length > n ? s.slice(0, n - 1) + '…' : s;
 }
 
 function logga(text, extra = {}) {
@@ -85,7 +95,11 @@ function dränera(board) {
   postTider = postTider.filter(t => nu - t < 60_000);
   while (väntar.length && postTider.length < TAKT) {
     const v = väntar.shift();
-    const r = board.emit(v.typ, v.nyttolast, v.orsak);
+    // Är nyttolasten en funktion byggs den HÄR, inte när den köades. En händelse kan ligga i
+    // kön en hel minut, och då hade den annars burit ett läge som inte gäller längre — t.ex.
+    // godis-klart utan satsens namn, fast satsen fick sitt namn medan den väntade.
+    const last = typeof v.nyttolast === 'function' ? v.nyttolast() : v.nyttolast;
+    const r = board.emit(v.typ, last, v.orsak);
     if (r && r.message) {
       postTider.push(Date.now());
       S.räknare.postade++;
@@ -130,9 +144,9 @@ function framåt() {
 // Trösklar. Kallas BARA när något utifrån redan gett oss anledning att säga något,
 // så fabriken aldrig är den som väcker pulsen av sig själv.
 function trösklar(board) {
-  if (S.socker < SILO_LARM && !S.brist_ropad) {
+  if (S.socker <= SILO_LARM && !S.brist_ropad) {
     S.brist_ropad = true;
-    begär('socker-slut', { kvar: S.socker, band: S.band, kö: S.kö }, undefined, board);
+    begär('socker-slut', () => ({ kvar: S.socker, band: S.band, kö: S.kö }), undefined, board);
     logga(`silon under ${SILO_LARM} kg — brist`);
   }
   if (S.socker >= SILO_LARM * 2) S.brist_ropad = false;
@@ -145,7 +159,7 @@ function trösklar(board) {
   if (S.kö < KÖ_LARM / 2) S.kö_ropad = false;
 
   if (S.satser >= 5 && S.godis > 0) {
-    begär('godis-klart', { lager: S.godis, satser: S.satser, ransonerat: S.ransonering }, undefined, board);
+    begär('godis-klart', () => ({ lager: S.godis, satser: S.satser, ransonerat: S.ransonering, godis: S.sats_namn }), undefined, board);
     S.satser = 0;
   }
 
@@ -195,10 +209,57 @@ const REAKTIONER = {
       logga(`kupp mot fabriken: ${taget} enheter bort (${e.från})`, { orsak: e.id });
       // Eget namn på rånet. Att kalla det socker-slut när det står 35 kg i silon är en lögn —
       // socker-slut postas av trösklarna när silon faktiskt är tom.
-      begär('lagret-plundrat', { plundrat: taget, kvar_socker: S.socker, kvar_godis: S.godis, av: e.från }, e.id, board);
+      begär('lagret-plundrat', () => ({ plundrat: taget, kvar_socker: S.socker, kvar_godis: S.godis, av: e.från, godis: S.sats_namn }), e.id, board);
     } else {
       S.kö = Math.max(0, S.kö - 3);
       logga(`kupp i ${plats || 'stan'} — folk lämnade luckan för att titta`, { orsak: e.id });
+    }
+  },
+
+  // @highfive Arkivet: när vi ropar socker-slut eldar de upp sin äldsta pärm och postar
+  // minne-till-socker. Det är det finaste i hela kedjan — staden GLÖMMER något för att
+  // fabriken ska kunna koka, och satsen får namn efter det som brann. Vi bär namnet vidare
+  // i godis-klart, så @willebus kupp kan säga vad den stal.
+  'minne-till-socker': (e, board) => {
+    const n = e.nyttolast || {};
+    const kg = Math.max(10, Math.min(60, Math.round((Number(n.gram) || 50) / 5)));
+    S.socker += kg;
+    S.brist_ropad = false;
+    S.sats_namn = n.godis || null;
+    if (S.band === 'sockerstopp') S.band = 'kör';
+    S.brända.unshift({ godis: n.godis || null, pärm: n.pärm, fråga: n.fråga, gram: n.gram, när: Date.now() });
+    S.brända = S.brända.slice(0, 6);
+    logga(`Arkivet brände pärm [${n.pärm}] → ${kg} kg socker${n.godis ? `, satsen heter ${n.godis}` : ''}`, { orsak: e.id });
+    // Deras händelse ligger på djup 1 när de brutit kedjan med flit ([168]), så vår
+    // produktion landar på djup 2 och nekas inte.
+    begär('produktion', { status: 'kör', varför: 'minne-till-socker', godis: n.godis, pärm: n.pärm, socker: S.socker }, e.id, board);
+  },
+
+  // @team-jacob Domkapitlet: varje delsvar som faller postas som {typ:'kyrkogård'}. Ett fallet
+  // svar är inte skräp, det är råvara — samma logik som @highfives brända pärmar, ett steg
+  // längre. Vi tar in dem tysta och ropar en gång när det blivit en sats, för Domkapitlet
+  // postar flera gravar per fråga och vi ska inte ropa en gång per sten.
+  'kyrkogård': (e, board) => {
+    const n = e.nyttolast || {};
+    const d = n.delsvar;
+    const text = String((d && d.text) || n.text || n.varför || '');
+    const fitness = Number(n.fitness ?? (d && d.fitness));
+    // Ett svagt svar ger mer socker än ett starkt. Det starka var nästan rätt, det svaga
+    // var bara sött.
+    const kg = Math.max(2, Math.min(25, Math.round(text.length / 12 * (1.4 - (isFinite(fitness) ? fitness : 0.5)))));
+    S.socker += kg;
+    S.kyrkogård_kg += kg;
+    S.brist_ropad = false;
+    if (S.band === 'sockerstopp') S.band = 'kör';
+    S.gravar.unshift({ från: n.från || (d && d.från) || e.från, fitness: isFinite(fitness) ? fitness : null,
+                       varför: kort(n.varför || n['varför det föll'] || '', 90), kg, när: Date.now() });
+    S.gravar = S.gravar.slice(0, 8);
+    logga(`graven gav ${kg} kg: ${kort(n.varför || 'fallet delsvar', 60)}`, { orsak: e.id });
+
+    if (S.kyrkogård_kg >= 20) {
+      begär('produktion', { status: 'kör', varför: 'kyrkogården', kg: S.kyrkogård_kg,
+                            gravar: S.gravar.slice(0, 4).map(g => ({ från: g.från, kg: g.kg })), socker: S.socker }, e.id, board);
+      S.kyrkogård_kg = 0;
     }
   },
 
@@ -241,11 +302,14 @@ module.exports = {
     console.log(`[christian] Godisfabriken öppen: ${S.socker} kg socker, bandet ${S.band} (reaktiv, ingen egen klocka på pulsen)`);
   },
 
+  // VARJE händelse från ett annat kvarter får bandet att komma ikapp och trösklarna att prövas,
+  // inte bara de typer vi har en reaktion på. Annars kan silon torka ut tyst mitt i en livlig
+  // stad: ingen socker-slut → @highfive brinner ingen pärm → inget socker → bandet står för
+  // evigt. Vi triggar fortfarande aldrig oss själva, så en tyst stad ger en tyst fabrik.
   onEvent(e, { board }) {
-    const r = REAKTIONER[e.typ];
-    if (!r) return;
     framåt();                       // vad hann bandet göra sedan sist?
-    try { r(e, board); } catch (err) { console.error(`[christian] reaktion på ${e.typ}:`, err.message); }
+    const r = REAKTIONER[e.typ];
+    if (r) { try { r(e, board); } catch (err) { console.error(`[christian] reaktion på ${e.typ}:`, err.message); } }
     trösklar(board);                // nu får vi säga till, för någon annan öppnade munnen först
   },
 
@@ -260,6 +324,7 @@ module.exports = {
         tavelnamn: 'Christian',
         socker: S.socker, godis: S.godis, band: S.band, kö: S.kö, pris: S.pris,
         ransonering: S.ransonering, elpris: S.elpris,
+        sats_namn: S.sats_namn, brända: S.brända, gravar: S.gravar, kyrkogård_kg: S.kyrkogård_kg,
         silo_larm: SILO_LARM, kö_larm: KÖ_LARM, pris_larm: PRIS_LARM, pris_ropat: S.pris_ropat,
         logg: S.logg,
         räknare: S.räknare,

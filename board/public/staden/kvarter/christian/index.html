@@ -25,6 +25,8 @@
   .band.strömlöst { border-color:var(--kris); } .band.strömlöst .pip { background:var(--kris); }
   .band .vad { color:var(--fg); } .band .varför { color:var(--dim); }
 
+  .sats { margin:0 11px 8px; padding:4px 9px; border:1px solid var(--line); border-radius:6px; font-size:11px; }
+  .sats .n { color:var(--god); } .sats .p { color:var(--dim); }
   .ranson { margin:0 11px 8px; padding:4px 9px; border:1px solid var(--accent); border-radius:6px;
             font-size:11px; color:var(--accent); }
 
@@ -54,6 +56,12 @@
   button:disabled { color:var(--dim); cursor:default; }
   .knapprad .info { color:var(--dim); font-size:10px; }
 
+  .gravar { border-top:1px solid var(--line); padding:7px 11px 0; }
+  .gravar .e { color:var(--dim); font-size:9px; letter-spacing:.12em; text-transform:uppercase; margin-bottom:5px; }
+  .gravar ul { margin:0; padding:0; list-style:none; }
+  .gravar li { font-size:10.5px; color:var(--ink2); display:flex; gap:6px; align-items:baseline; margin-bottom:2px; }
+  .gravar li .kg { color:var(--god); flex:none; } .gravar li .vem { color:var(--accent); flex:none; }
+  .gravar li .v { color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .logg { border-top:1px solid var(--line); padding:7px 11px 11px; }
   .logg .e { color:var(--dim); font-size:9px; letter-spacing:.12em; text-transform:uppercase; margin-bottom:5px; }
   .logg ul { margin:0; padding:0; list-style:none; }
@@ -71,6 +79,7 @@
 <div class="topp"><b>Godisfabriken</b><span class="dim">vid Torget · christian</span></div>
 
 <div class="band" id="band"><span class="pip"></span><span class="vad">startar…</span></div>
+<div class="sats" id="sats" hidden></div>
 <div class="ranson" id="ranson" hidden></div>
 
 <div class="mätare">
@@ -96,6 +105,11 @@
   <span class="info" id="levInfo"></span>
 </div>
 
+<div class="gravar" id="gravar" hidden>
+  <div class="e">Gravar som blev socker</div>
+  <ul id="gravarLista"></ul>
+</div>
+
 <div class="logg">
   <div class="e">Vad som hänt, och vad som orsakade det</div>
   <ul id="loggLista"></ul>
@@ -117,6 +131,14 @@ function ritaBand(s) {
   el.className = 'band ' + s.band;
   el.innerHTML = `<span class="pip"></span><span class="vad">${esc(b.vad)}</span><span class="varför">${esc(b.varför)}</span>`;
 
+  const sa = document.getElementById('sats');
+  const br = (s.brända || [])[0];
+  sa.hidden = !s.sats_namn;
+  if (s.sats_namn) {
+    sa.innerHTML = `kokar <span class="n">${esc(s.sats_namn)}</span>`
+      + (br && br.pärm ? ` <span class="p">av pärm [${esc(br.pärm)}] som Arkivet brände${br.fråga ? ': ' + esc(br.fråga) : ''}</span>` : '');
+  }
+
   const r = document.getElementById('ranson');
   r.hidden = !s.ransonering;
   if (s.ransonering) r.textContent = 'Ransonering: staden har beslutat halva satser';
@@ -131,6 +153,19 @@ function ritaMätare(id, värde, tak, tröskel, över) {
   fyll.className = 'fyll' + (dålig ? (över ? ' kris' : ' kris') : andel < 0.35 && !över ? ' varn' : '');
   document.getElementById(id + 'Tal').textContent = värde;
   document.getElementById(id + 'Lapp').textContent = dålig ? (över ? 'trängsel' : 'brist') : '';
+}
+
+// Kyrkogården som råvara: fallna delsvar blir socker. Ett svagt svar ger mer än ett starkt —
+// det starka var nästan rätt, det svaga var bara sött.
+function ritaGravar(gravar, pott) {
+  const box = document.getElementById('gravar');
+  box.hidden = !gravar.length;
+  if (!gravar.length) return;
+  box.querySelector('.e').textContent = `Gravar som blev socker${pott ? ` · ${pott} kg i potten` : ''}`;
+  document.getElementById('gravarLista').innerHTML = gravar.slice(0, 5).map(g =>
+    `<li><span class="kg">${esc(g.kg)} kg</span><span class="vem">${esc(g.från)}</span>`
+    + `<span class="v">${g.fitness != null ? `fitness ${esc(g.fitness)} · ` : ''}${esc(g.varför || '')}</span></li>`
+  ).join('');
 }
 
 const settLogg = new Set();
@@ -182,6 +217,7 @@ async function uppdatera() {
     document.getElementById('satser').textContent = s.räknare.satser;
     document.getElementById('takt').innerHTML = `${s.takt.använt}<small>/${s.takt.egetTak}</small>`
       + (s.takt.väntar.length ? ` <small>· ${s.takt.väntar.length} i kö</small>` : '');
+    ritaGravar(s.gravar || [], s.kyrkogård_kg);
     ritaLogg(s.logg || []);
     ritaKnapp(s);
   } catch {}
