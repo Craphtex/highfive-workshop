@@ -14,6 +14,9 @@
 //
 //   GET  /t/christian/status     hela fabrikens läge + loggen med orsakskedjan
 //   POST /t/christian/leverans   en människa vid storskärmen fyller silon (spärr: en gång per 20 s)
+//   POST /t/christian/rusta?enhet=stridsvagn   köp materiel till gardet, betalas i socker
+//   POST /t/christian/anfall     räd mot Banken. Förlustaffär: lasernätet avvärjer alltid och
+//                                fakturerar oss. Ligger här för att den efterfrågats, aldrig automatisk.
 //
 // Takt: vi tar högst 3 av serverns 6 händelser per team och minut. Det som inte får plats köas i
 // stället för att tappas, och kön syns i rutan.
@@ -42,6 +45,14 @@ const INDRIV_MAX = 5;            // hur mycket gardet orkar bära per vända
 // Råvarutyper gardet får hämta hem. Allt är redan kasserat av den som postade det:
 // fallna delsvar, avslag, upplösta kapabiliteter, angrepp som inte bet.
 const RÅVARA = { 'kyrkogård': 'grav', 'avslag': 'avslag', 'avfall': 'avfall', 'upplöst': 'upplöst', 'angrepp': 'angrepp' };
+
+// Tung materiel till Sockergardet. Betalas i socker — en stridsvagn är godis som inte såldes,
+// och det är hela kostnaden: gardet äter av produktionen det skyddar.
+const MATERIEL = {
+  attackdrönare:    { kg: 15, styrka:  4, text: 'spanar av lastkajen och ser kuppen komma' },
+  attackhelikopter: { kg: 40, styrka: 10, text: 'följer jakten ut ur kvarteret' },
+  stridsvagn:       { kg: 80, styrka: 20, text: 'står på lastkajen och gör wanted 4 till ett dåligt beslut' },
+};
 const LEVERANS_SPÄRR = 20_000;   // människan får fylla silon en gång per 20 s
 const LOGG_MAX = 40;
 
@@ -64,6 +75,11 @@ const tomt = () => ({
   eskorter: [],                  // {när, mot, wanted, styrka, utfall}
   indrivet: [],                  // händelse-id vi redan förädlat, så inget tas två gånger
   banken_kupper: 0,              // kupper mot Banken vi sett — deras svaghet är vår styrka
+  materiel: { attackdrönare: 0, attackhelikopter: 0, stridsvagn: 0 },
+  mybanks: 0,                    // vår andel av bankens ränteintäkter
+  partner: false,                // valutapartner hos @mybank
+  nekade_lån: [],                // lånerbjudanden vi tackat nej till
+  räder: [],                     // försök mot Banken och vad de kostade
   ställning: 'rustad',
   kyrkogård_kg: 0,               // råvara från fallna delsvar sedan senaste utropet
   gravar: [],                    // {från, fitness, varför, kg, när}
@@ -227,6 +243,12 @@ function lastkaj(e, board, sort) {
 // oförädlad. Allt det hämtar är redan kasserat av den som postade det — gardet tar inget
 // levande, det bär hem det staden redan lagt ifrån sig.
 
+function materielStyrka() {
+  let n = 0;
+  for (const [namn, antal] of Object.entries(S.materiel || {})) n += (MATERIEL[namn]?.styrka || 0) * antal;
+  return n;
+}
+
 function ställning() {
   if (S.styrka >= 75) return 'överlägsen';
   if (S.styrka >= 40) return 'rustad';
@@ -237,7 +259,7 @@ function ställning() {
 function eskortera(e, board) {
   const wanted = Number((e.nyttolast && e.nyttolast.wanted) || 1);
   const förare = (e.nyttolast && e.nyttolast.förare) || null;
-  const försvar = S.styrka / GARDE_MAX;
+  const försvar = (S.styrka + materielStyrka()) / GARDE_MAX;
   const angrepp = Math.min(1, wanted / 4);
   const höll = försvar > angrepp;
 
@@ -326,7 +348,11 @@ const REAKTIONER = {
     // En krona i taget är inte en nyhet. Vi säger till när priset dragit ifrån på allvar,
     // annars blir fabriken en av dem som fyller bussen med småprat.
     if (S.pris - S.pris_ropat >= PRIS_LARM) {
-      begär('prishöjning', { pris: S.pris, från_pris: S.pris_ropat, varför: 'elpris', elpris: kr }, e.id, board);
+      // mybanks-fältet gör oss till valutapartner hos @mybank (deras rad 186): 10 % av bankens
+      // vinst en gång, sedan 2 % av varje ränteintäkt. Det är ett fält, och det är den enda
+      // vägen som faktiskt flyttar pengar FRÅN banken. Ett rån flyttar dem åt andra hållet.
+      begär('prishöjning', () => ({ pris: S.pris, från_pris: S.pris_ropat, varför: 'elpris',
+                                    elpris: kr, mybanks: S.pris, valuta: 'MyBanks' }), e.id, board);
       S.pris_ropat = S.pris;
     }
   },
@@ -380,6 +406,45 @@ const REAKTIONER = {
   'avslag':  (e, board) => lastkaj(e, board, 'avslag'),
   'upplöst': (e, board) => lastkaj(e, board, 'upplöst'),
 
+  // @mybank delar ut lån ingen bett om, och vårt socker-slut triggar dem att erbjuda 500
+  // MyBanks till 49 % ränta (deras rad 196). Så driver de in och utmäter andelar tills de äger
+  // staden. Vi tackar nej varje gång och visar det i rutan. Det är den enda försvarslinje som
+  // fungerar mot en bank: att inte vara skyldig den något.
+  'lån-erbjudande': (e) => {
+    const n = e.nyttolast || {};
+    if (n.kvarter && n.kvarter !== 'christian') return;
+    S.nekade_lån.unshift({ när: Date.now(), belopp: n.belopp, ränta: n.ränta });
+    S.nekade_lån = S.nekade_lån.slice(0, 6);
+    logga(`nekade lån: ${n.belopp} MyBanks till ${n.ränta} % ränta`, { orsak: e.id });
+  },
+
+  // Vår andel av bankens ränteintäkter, 2 % per takt så länge vi räknar i MyBanks.
+  'partnerutdelning': (e) => {
+    const n = e.nyttolast || {};
+    if (n.kvarter !== 'christian') return;
+    S.partner = true;
+    S.mybanks += Number(n.belopp) || 0;
+    logga(`partnerutdelning ${Math.round(Number(n.belopp) || 0)} MyBanks — vår andel av bankens ränta`, { orsak: e.id });
+  },
+  'kvitto': (e) => {
+    const n = e.nyttolast || {};
+    if (n.kvarter !== 'christian') return;
+    if (n.mybanks != null) S.mybanks += Number(n.mybanks) || 0;
+  },
+
+  // Utfallet av en räd mot Banken. Vi hittar på det inte själva — banken avgör, och deras
+  // lasernät avvärjer alltid OCH fakturerar oss (deras rad 241).
+  'kupp-avvärjd': (e) => {
+    const n = e.nyttolast || {};
+    if (n.kvarter !== 'christian') return;
+    const räkning = Number(n.räkning) || 0;
+    S.mybanks -= räkning;
+    const r = S.räder.find(x => !x.utfall);
+    if (r) { r.utfall = 'avvärjd'; r.räkning = räkning; r.försvar = n.försvar; r.post = n.post; }
+    S.styrka = Math.max(0, S.styrka - GARDE_FÖRLUST);
+    logga(`räden mot Banken avvärjdes av ${n.försvar || 'försvaret'} — vi faktureras ${räkning} MyBanks`, { orsak: e.id });
+  },
+
   'jakt': (e) => { S.kö = Math.max(0, S.kö - 2); logga('sirener utanför, kön skingrades', { orsak: e.id }); },
   'överlämning': (e) => { S.kö += 1; logga('jakten drog vidare, folk kom tillbaka', { orsak: e.id }); },
 
@@ -430,7 +495,7 @@ module.exports = {
     trösklar(board);                // nu får vi säga till, för någon annan öppnade munnen först
   },
 
-  async handle(req, res, { path: p, board }) {
+  async handle(req, res, { path: p, url, board }) {
     if (req.method === 'GET' && (p === '/status' || p === '/status/')) {
       framåt();                     // en läsning får flytta bandet, men aldrig posta något
       const nu = Date.now();
@@ -442,14 +507,50 @@ module.exports = {
         socker: S.socker, godis: S.godis, band: S.band, kö: S.kö, pris: S.pris,
         ransonering: S.ransonering, elpris: S.elpris,
         sats_namn: S.sats_namn, brända: S.brända, gravar: S.gravar, kyrkogård_kg: S.kyrkogård_kg,
-        garde: { styrka: S.styrka, max: GARDE_MAX, ställning: S.ställning, eskorter: S.eskorter,
-                 banken_kupper: S.banken_kupper, indrivet: S.indrivet.length },
+        garde: { styrka: S.styrka, materiel_styrka: materielStyrka(), total: S.styrka + materielStyrka(),
+                 max: GARDE_MAX, ställning: S.ställning, eskorter: S.eskorter,
+                 banken_kupper: S.banken_kupper, indrivet: S.indrivet.length, materiel: S.materiel },
+        bank: { mybanks: Math.round(S.mybanks), partner: S.partner, nekade_lån: S.nekade_lån, räder: S.räder },
+        priser: MATERIEL,
         silo_larm: SILO_LARM, kö_larm: KÖ_LARM, pris_larm: PRIS_LARM, pris_ropat: S.pris_ropat,
         logg: S.logg,
         räknare: S.räknare,
         takt: { använt: postTider.length, egetTak: TAKT, serverTak: 6, väntar: väntar.map(v => v.typ) },
         leverans_om: Math.max(0, LEVERANS_SPÄRR - (nu - senasteLeverans)),
       });
+    }
+
+    // Rusta gardet. Betalas i socker: materiel är godis som inte såldes.
+    if (req.method === 'POST' && (p === '/rusta' || p === '/rusta/')) {
+      const enhet = (url && url.searchParams.get('enhet')) || '';
+      const m = MATERIEL[enhet];
+      if (!m) return svara(res, { ok: false, varför: 'okänd enhet', enheter: Object.keys(MATERIEL) }, 400);
+      framåt();
+      if (S.socker < m.kg) return svara(res, { ok: false, varför: 'för lite socker', kräver: m.kg, har: S.socker }, 409);
+      S.socker -= m.kg;
+      S.materiel[enhet] = (S.materiel[enhet] || 0) + 1;
+      logga(`gardet rustade: ${enhet} (${m.kg} kg socker) — ${m.text}`);
+      trösklar(board);
+      return svara(res, { ok: true, enhet, materiel: S.materiel, styrka: S.styrka + materielStyrka(), socker: S.socker });
+    }
+
+    // Räd mot Banken. Den ligger här för att den efterfrågats, men den är en förlustaffär och
+    // rutan säger det: @mybanks lasernät avvärjer ALLTID (deras rad 229-243), beredskapen går
+    // till max, och vi faktureras. Ingen automatik rör den här — en människa får trycka.
+    // ASCII i sökvägen med flit: servern skickar url.pathname orört till pluginet (server.js:282),
+    // utan decodeURIComponent. En route med å, ä eller ö kommer in som %C3%A4 och matchar aldrig.
+    if (req.method === 'POST' && (p === '/anfall' || p === '/anfall/')) {
+      const styrka = S.styrka + materielStyrka();
+      const enheter = Object.entries(S.materiel).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${k}`);
+      if (!enheter.length) return svara(res, { ok: false, varför: 'gardet har ingen materiel att gå in med' }, 409);
+      S.räder.unshift({ när: Date.now(), styrka, enheter, utfall: null });
+      S.räder = S.räder.slice(0, 5);
+      const r = board.emit('räd', { mål: 'Banken', enheter, styrka,
+        text: `Sockergardet går mot Banken med ${enheter.join(', ')}. Vi vet att lasernätet står.` });
+      logga(`räd mot Banken med ${enheter.join(', ')}`, r && r.message ? { id: r.message.id } : { nekad: true });
+      spara();
+      return svara(res, { ok: !!(r && r.message), postat: r && r.message ? r.message.id : null,
+        varning: 'Banken avvärjer alltid och fakturerar oss. Ett rån flyttar pengar åt fel håll.' });
     }
 
     // Människan vid storskärmen fyller silon. Det är fabrikens enda ingång utifrån.
