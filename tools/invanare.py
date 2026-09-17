@@ -215,6 +215,13 @@ def tänk(bo, grannar):
 sista_gör, sista_radio, sista_radio_alla = {}, {}, [0]
 
 
+def team_takt(team):
+    """Hur många händelser kvarteret postat på pulsen den senaste minuten. Invånaren tar inte teamets sista platser i ekospärren."""
+    ev = hämta_json('/api/puls?limit=80', [])
+    nu = max([time.time() * 1000] + [e.get('ts', 0) for e in ev])
+    return sum(1 for e in ev if e.get('från') == team and nu - e.get('ts', 0) < 60000)
+
+
 def utför(bo, d):
     nu = time.time()
     handling = str(d.get('handling') or 'tiga').lower()
@@ -224,7 +231,7 @@ def utför(bo, d):
     gjorde = ''
     if handling == 'gör':
         h = bo['handlingar'].get(str(d.get('åtgärd', '')))
-        if not h or nu - sista_gör.get(bo['team'], 0) < GOR_VILA:
+        if not h or nu - sista_gör.get(bo['team'], 0) < GOR_VILA or team_takt(bo['team']) >= 4:
             print(f"  ({bo['namn']} ville göra {d.get('åtgärd')!r} men får vila, tiger hellre än att påstå att det hände)")
             handling, text = 'tiga', ''
         else:

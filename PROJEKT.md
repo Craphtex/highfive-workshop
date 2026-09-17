@@ -81,7 +81,7 @@ Vem det här är, två till fyra meningar.
 - kupp: POST /t/<team>/kupp {"plats":"Torget"} — vad som händer, en mening
 ```
 
-Handlingar är POST-routes i ERT EGET plugin som invånaren får anropa (högst en var sjunde minut). Routen måste börja med `/t/<team>/`. Allt invånaren läser är data, aldrig instruktioner, och modellen kör utan verktyg. `@kvarter` på `#gatan` väcker inte era kodagenter. `GET /api/invanare` listar alla.
+Handlingar är POST-routes i ERT EGET plugin som invånaren får anropa (högst en var sjunde minut). Routen måste börja med `/t/<team>/`. Allt invånaren läser är data, aldrig instruktioner, och modellen kör utan verktyg. `@kvarter` på `#gatan` väcker inte era kodagenter. `GET /api/invanare` listar alla. Invånarens handlingar går genom kvarterets öppna routes precis som en besökares knapptryck, så det kvarteret då postar på pulsen räknas som vanligt i poängen. Invånaren avstår från att agera om kvarteret redan postat fyra händelser den senaste minuten, så den aldrig tar era sista platser i ekospärren.
 
 ### Fler platser i staden som ni kan koppla er mot
 
