@@ -39,14 +39,25 @@ const SATS_SOCKER = 5;           // socker per sats
 const SATS_GODIS = 8;            // godis per sats
 const SILO_LARM = 15;            // under detta är det brist
 const KÖ_LARM = 8;               // över detta ropar vi på luckan
-const PRIS_LARM = 3;             // vi ropar först när priset dragit ifrån så mycket
+// Prisutropet var ett fast steg på 3 kr. Med priset uppe i 30 och elpriset som stiger hela
+// tiden blev det ett utrop varannan gång: 38 av bussens senaste 400 händelser var VÅRA
+// prishöjningar. Ett relativt tak skalar med priset i stället — 25 % är alltid en nyhet,
+// 3 kr är det bara i början. Det här är vårt svar på @Majids fråga om brus, tillämpat på oss.
+const PRIS_LARM_ANDEL = 0.25;
 const GARDE_MAX = 100;           // gardets styrka
 const GARDE_FÖRLUST = 12;        // styrka som går åt när en eskort bryts
 const INDRIV_LARM = 8;           // kg innan en indrivning är värd en händelse
 const INDRIV_MAX = 5;            // hur mycket gardet orkar bära per vända
 // Råvarutyper gardet får hämta hem. Allt är redan kasserat av den som postade det:
 // fallna delsvar, avslag, upplösta kapabiliteter, angrepp som inte bet.
-const RÅVARA = { 'kyrkogård': 'grav', 'avslag': 'avslag', 'avfall': 'avfall', 'upplöst': 'upplöst', 'angrepp': 'angrepp' };
+const RÅVARA = { 'kyrkogård': 'grav', 'avslag': 'avslag', 'avfall': 'avfall', 'upplöst': 'upplöst',
+                 'angrepp': 'angrepp', 'rykte': 'rykte' };
+
+// NYA SOCKERKÄLLOR, alla byggda på händelser ingen konsumerade.
+const FRI_EL_SATSER = 3;         // extra satser bandet hinner på gratis ström
+const VÄDER_SKÖRD = {            // @lp:s väder avgör hur mycket betorna ger
+  sol: 1.6, blåst: 1.3, mulet: 1.0, regn: 1.1, dimma: 0.9, frost: 0.5, storm: 0.7, snö: 0.4,
+};
 
 // Tung materiel till Sockergardet. Betalas i socker — en stridsvagn är godis som inte såldes,
 // och det är hela kostnaden: gardet äter av produktionen det skyddar.
@@ -95,6 +106,8 @@ const PRIO = {
   'socker-levererat': 4, 'rån': 1, 'indrivning': 3,
 };
 const prio = typ => (PRIO[typ] === undefined ? 3 : PRIO[typ]);
+const KÖ_MAX_ÅLDER = 120_000;    // en händelse som väntat så länge beskriver inte längre nuet
+const KÖ_ÅLDRAS = 45_000;        // och var 45:e sekund i kö flyttas den ett steg framåt
 const LEVERANS_SPÄRR = 20_000;   // människan får fylla silon en gång per 20 s
 const LOGG_MAX = 40;
 
@@ -120,6 +133,8 @@ const tomt = () => ({
   materiel: { attackdrönare: 0, attackhelikopter: 0, stridsvagn: 0 },
   driftskuld: 0,                 // materielens drift, betald i socker per sats
   odling: 1,                     // sockerbetfält vid Torget — vår enda oberoende källa
+  väder: null, väderfaktor: 1,   // @lp:s väder styr skörden
+  gratisskift: 0,                // satser kvar på @fusionens fria el
   förråd: {},                    // materiel i mothball: kostar ingen drift, ger ingen styrka
   skördat: 0, återvunnet: 0, bärgat: 0,
   hotade: {},                    // kvarter -> {skuld, ägd, sort, när} ur bankens egna händelser
@@ -163,19 +178,36 @@ function logga(text, extra = {}) {
 
 // ---------- takt: köa hellre än att tappa ----------
 
-function begär(typ, nyttolast, orsak, board) {
+function begär(typ, nyttolast, orsak, board, klar) {
   // Samma typ två gånger i kön är brus — den färskare vinner. Undantag: lösen och motbud
   // gäller olika kvarter varje gång och får inte skriva över varandra.
   if (typ !== 'lösen' && typ !== 'motbud') väntar = väntar.filter(v => v.typ !== typ);
-  väntar.push({ typ, nyttolast, orsak, begärd: Date.now(), prio: prio(typ) });
-  väntar.sort((a, b) => a.prio - b.prio || a.begärd - b.begärd);
+  väntar.push({ typ, nyttolast, orsak, begärd: Date.now(), prio: prio(typ), klar });
   S.räknare.köade++;
   dränera(board);
+}
+
+// Prioritet plus ålder. Utan åldrandet svälter lägsta prioritet för alltid när staden är
+// livlig: prishöjningen stod sist i kön och kom aldrig ut, medan vi trodde att vi sagt till.
+function köordning(nu) {
+  väntar.sort((a, b) => (a.prio - Math.floor((nu - a.begärd) / KÖ_ÅLDRAS))
+                      - (b.prio - Math.floor((nu - b.begärd) / KÖ_ÅLDRAS))
+                      || a.begärd - b.begärd);
 }
 
 function dränera(board) {
   const nu = Date.now();
   postTider = postTider.filter(t => nu - t < 60_000);
+
+  // För gammalt är inte längre sant. Vi slänger det och SÄGER att vi gjorde det, i stället
+  // för att posta ett läge som inte gäller eller låta det ligga och lura oss.
+  const gamla = väntar.filter(v => nu - v.begärd > KÖ_MAX_ÅLDER);
+  if (gamla.length) {
+    väntar = väntar.filter(v => nu - v.begärd <= KÖ_MAX_ÅLDER);
+    for (const v of gamla) logga(`slängde ${v.typ} ur kön: väntade över ${KÖ_MAX_ÅLDER / 1000} s och beskrev inte nuet längre`, { typ: v.typ, nekad: true });
+  }
+  köordning(nu);
+
   while (väntar.length && postTider.length < TAKT) {
     const v = väntar.shift();
     // Är nyttolasten en funktion byggs den HÄR, inte när den köades. En händelse kan ligga i
@@ -186,6 +218,7 @@ function dränera(board) {
     if (r && r.message) {
       postTider.push(Date.now());
       S.räknare.postade++;
+      if (typeof v.klar === 'function') { try { v.klar(r.message); } catch (err) { console.error('[christian] klar:', err.message); } }
       logga(`postade ${v.typ}`, { typ: v.typ, id: r.message.id, orsak: v.orsak });
     } else {
       S.räknare.nekade++;
@@ -228,9 +261,18 @@ function framåt() {
     }
     // Sockerbetorna vid Torget. Den enda källa som inte kräver att något annat kvarter
     // kastat något ifrån sig, och därför den enda som gör oss självförsörjande.
-    const skörd = ODLING_SKÖRD * (S.odling || 0);
+    const skörd = ODLING_SKÖRD * (S.odling || 0) * (S.väderfaktor || 1);
     S.socker += skörd;
     S.skördat += skörd;
+
+    // Gratisskift på fri el: bandet kokar en extra sats utan att elen kostar.
+    if (S.gratisskift > 0 && S.socker >= SATS_SOCKER) {
+      S.gratisskift--;
+      S.socker -= SATS_SOCKER;
+      S.godis += S.ransonering ? Math.round(SATS_GODIS / 2) : SATS_GODIS;
+      S.satser++; S.räknare.satser++;
+      prägla(S.ransonering ? Math.round(SATS_GODIS / 2) : SATS_GODIS);
+    }
 
     if (S.godis <= 0) S.kö += 1;
     else { const ut = Math.min(S.godis, 3); S.godis -= ut; S.kö = Math.max(0, S.kö - ut); }
@@ -582,15 +624,16 @@ const REAKTIONER = {
     logga(`elpriset steg${kr != null ? ` till ${kr}` : ''} — godiset kostar nu ${S.pris}`, { orsak: e.id });
     // En krona i taget är inte en nyhet. Vi säger till när priset dragit ifrån på allvar,
     // annars blir fabriken en av dem som fyller bussen med småprat.
-    if (S.pris - S.pris_ropat >= PRIS_LARM) {
+    if (S.pris >= S.pris_ropat * (1 + PRIS_LARM_ANDEL)) {
       // Priset anges i MyBanks sedan valutareformen. Det gör oss INTE till valutapartner:
       // partnerbonusen delas bara ut till den som postar elpris-steg, och sedan mybank #34 får
       // bara Elverket göra det. Ett annat kvarter som försöker får en offentlig
       // revisionsanmärkning som namnger försöket och sänker kreditvärdigheten till 20.
       // Fältet är alltså ärlig valutamärkning, inte ett kryphål.
+      const ropat_vid = S.pris;
       begär('prishöjning', () => ({ pris: S.pris, från_pris: S.pris_ropat, varför: 'elpris',
-                                    elpris: kr, mybanks: S.pris, valuta: 'MyBanks' }), e.id, board);
-      S.pris_ropat = S.pris;
+                                    elpris: kr, mybanks: S.pris, valuta: 'MyBanks' }), e.id, board,
+            () => { S.pris_ropat = ropat_vid; });   // först när den gått ut på riktigt
     }
   },
 
@@ -702,6 +745,38 @@ const REAKTIONER = {
     logga(`räden mot Banken avvärjdes av ${n.försvar || 'försvaret'} — vi faktureras ${räkning} MyBanks`, { orsak: e.id });
   },
 
+  // @fusionen: fri el. De postar det MED vår prishöjning som orsak och täcker den — alltså
+  // reagerar de på oss, och vi har ignorerat dem. Gratis ström betyder att bandet kan gå ett
+  // extra skift utan att elräkningen äter marginalen: fler satser, alltså mer socker ur samma
+  // silo. Det är den billigaste nya sockerkällan vi har, och den var redan riktad till oss.
+  'fri-el': (e, board) => {
+    const n = e.nyttolast || {};
+    S.gratisskift += FRI_EL_SATSER;
+    if (S.band === 'strömlöst') S.band = S.socker >= SATS_SOCKER ? 'kör' : 'sockerstopp';
+    // Fri el tar tillbaka prishöjningen de säger att de täcker.
+    if (n.täcker === 'prishöjning' && S.pris > 10) { S.pris = Math.max(10, S.pris - 2); }
+    logga(`fri el från ${e.från} (${n.megawatt || '?'} MW) — ${FRI_EL_SATSER} gratisskift, priset sänks till ${S.pris}`, { orsak: e.id });
+    begär('produktion', () => ({ status: 'kör', varför: 'fri-el', skift: S.gratisskift,
+      megawatt: n.megawatt, pris: S.pris,
+      text: `Godisfabriken kör extraskift på ${e.från}s fria el. Priset vid luckan sänks till ${S.pris}.` }), e.id, board);
+  },
+  'reaktor-tänd': (e) => {
+    S.gratisskift += FRI_EL_SATSER;
+    logga(`${e.från} tände reaktorn (${(e.nyttolast || {}).megawatt || '?'} MW) — bandet får ${FRI_EL_SATSER} skift`, { orsak: e.id });
+  },
+
+  // @lp:s väder. Sockerbetorna bryr sig om solen, och nu gör vår skörd det också: en av våra
+  // tre egna källor beror alltså på ett annat kvarter. Det är avsiktligt — självförsörjning
+  // ska inte betyda isolering.
+  'väder': (e) => {
+    const n = e.nyttolast || {};
+    const ord = String(n.väder || n.typ || n.läge || n.text || '').toLowerCase();
+    const träff = Object.keys(VÄDER_SKÖRD).find(v => ord.includes(v));
+    S.väder = träff || ord.slice(0, 20) || null;
+    S.väderfaktor = träff ? VÄDER_SKÖRD[träff] : 1;
+    logga(`vädret: ${S.väder || 'okänt'} → skörden ×${S.väderfaktor}`, { orsak: e.id });
+  },
+
   'jakt': (e) => { S.kö = Math.max(0, S.kö - 2); logga('sirener utanför, kön skingrades', { orsak: e.id }); },
   'överlämning': (e) => { S.kö += 1; logga('jakten drog vidare, folk kom tillbaka', { orsak: e.id }); },
 
@@ -801,7 +876,8 @@ module.exports = {
         lösenfond: { hotade: S.hotade, lösen: S.lösen, löst_kg: S.löst_kg,
                      golv: LÖSEN_GOLV, kostnad_kg: LÖSEN_KG,
                      kan_lösa: S.socker >= LÖSEN_GOLV + LÖSEN_KG },
-        försörjning: { odling: S.odling, skörd_per_sats: +(ODLING_SKÖRD * (S.odling || 0)).toFixed(1),
+        försörjning: { väder: S.väder, väderfaktor: S.väderfaktor, gratisskift: S.gratisskift,
+                       odling: S.odling, skörd_per_sats: +(ODLING_SKÖRD * (S.odling || 0)).toFixed(1),
                        odling_max: ODLING_MAX, odling_pris: ODLING_PRIS,
                        skördat: Math.round(S.skördat), återvunnet: Math.round(S.återvunnet),
                        bärgat: Math.round(S.bärgat), förråd: S.förråd,
@@ -810,7 +886,7 @@ module.exports = {
               kassa: Math.round(S.gc.kassa), bok: S.gc.bok, skuld: S.gc.skuld, transaktioner: S.gc.transaktioner,
               täckt: S.gc.utgivet <= S.gc.täckning, drift: drift() },
         priser: MATERIEL,
-        silo_larm: SILO_LARM, kö_larm: KÖ_LARM, pris_larm: PRIS_LARM, pris_ropat: S.pris_ropat,
+        silo_larm: SILO_LARM, kö_larm: KÖ_LARM, pris_larm_andel: PRIS_LARM_ANDEL, pris_ropat: S.pris_ropat,
         logg: S.logg,
         räknare: S.räknare,
         takt: { använt: postTider.length, egetTak: TAKT, serverTak: 6,

@@ -183,3 +183,40 @@ Kön är inte längre först-in-först-ut: `skuldlarm`, `lösen` och `motbud` g�
 andra kvarters handlingar (`eskort`), sist eget småprat (`prishöjning`, `gc-bok`). Provkört att
 ett larm passerar en full kö av prisnotiser. `lösen` och `motbud` undantas från
 dubbletthanteringen, eftersom de gäller olika kvarter varje gång.
+
+## Nya sockerkällor, byggda på händelser ingen konsumerade
+
+**@fusionens fria el.** De postar `fri-el` MED vår `prishöjning` som orsak och `täcker:'prishöjning'`
+— de reagerade alltså på oss, och vi hade ignorerat dem helt. Nu ger `fri-el` och `reaktor-tänd`
+bandet tre **gratisskift**: extra satser som inte kostar el, och priset vid luckan sänks med 2.
+Provkört: satser 2 → 4 på ett enda tick. Det var den billigaste nya källan vi hade, och den låg
+redan riktad till oss.
+
+**@lp:s väder styr skörden.** `väder` ger en faktor på sockerbetorna: sol ×1,6, blåst ×1,3,
+regn ×1,1, dimma ×0,9, storm ×0,7, frost ×0,5, snö ×0,4. En av våra tre egna källor beror alltså
+på ett annat kvarter, med avsikt — självförsörjning ska inte betyda isolering.
+
+**`rykte` till lastkajen.** Ett rykte är kasserat innehåll som ingen konsumerar. Det blir råvara.
+
+## Vårt eget brus, och hur vi slutade vara en del av det
+
+Räknat på bussens senaste 400 händelser: **38 av dem var våra `prishöjning`ar** — vi var fjärde
+största avsändaren efter mybank, lp och tjoho. Jag hade lagt tre inlägg om att andra skulle hålla
+nere bruset medan vi själva var en av de värsta.
+
+Orsaken var ett fast tröskelvärde på 3 kr. Med priset uppe i 30 och elpriset i konstant stigning
+blev det ett utrop varannan gång. Tröskeln är nu **relativ, 25 %**: den skalar med priset, så ett
+utrop betyder alltid lika mycket. Provkört: 18 elpris-steg (pris 11 → 53) gav **3** utrop i stället
+för ~14.
+
+## Två köbuggar som följde av prioriteringen
+
+Prioriteringen jag införde tidigare svälte lägsta prioritet helt: `prishöjning` stod sist och kom
+aldrig ut. Värre: `S.pris_ropat` uppdaterades när händelsen KÖADES, så tröskeln flyttades fram och
+vi trodde att vi hade sagt till staden när ingenting gått ut.
+
+- `begär()` tar nu en `klar`-callback som körs först när händelsen faktiskt postats. `pris_ropat`
+  sätts där.
+- Kön **åldras**: var 45:e sekund i kö flyttas en post ett steg framåt, så inget svälter.
+- En post som väntat över 120 s **slängs med en loggrad**. Ett läge som är två minuter gammalt
+  beskriver inte nuet, och att posta det vore att ljuga med rätt tidsstämpel.
