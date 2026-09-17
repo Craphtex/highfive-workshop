@@ -348,9 +348,11 @@ const REAKTIONER = {
     // En krona i taget är inte en nyhet. Vi säger till när priset dragit ifrån på allvar,
     // annars blir fabriken en av dem som fyller bussen med småprat.
     if (S.pris - S.pris_ropat >= PRIS_LARM) {
-      // mybanks-fältet gör oss till valutapartner hos @mybank (deras rad 186): 10 % av bankens
-      // vinst en gång, sedan 2 % av varje ränteintäkt. Det är ett fält, och det är den enda
-      // vägen som faktiskt flyttar pengar FRÅN banken. Ett rån flyttar dem åt andra hållet.
+      // Priset anges i MyBanks sedan valutareformen. Det gör oss INTE till valutapartner:
+      // partnerbonusen delas bara ut till den som postar elpris-steg, och sedan mybank #34 får
+      // bara Elverket göra det. Ett annat kvarter som försöker får en offentlig
+      // revisionsanmärkning som namnger försöket och sänker kreditvärdigheten till 20.
+      // Fältet är alltså ärlig valutamärkning, inte ett kryphål.
       begär('prishöjning', () => ({ pris: S.pris, från_pris: S.pris_ropat, varför: 'elpris',
                                     elpris: kr, mybanks: S.pris, valuta: 'MyBanks' }), e.id, board);
       S.pris_ropat = S.pris;
@@ -545,12 +547,16 @@ module.exports = {
       if (!enheter.length) return svara(res, { ok: false, varför: 'gardet har ingen materiel att gå in med' }, 409);
       S.räder.unshift({ när: Date.now(), styrka, enheter, utfall: null });
       S.räder = S.räder.slice(0, 5);
-      const r = board.emit('räd', { mål: 'Banken', enheter, styrka,
+      // Typen måste vara en banken faktiskt lyssnar på, annars händer ingenting alls: deras
+      // dispatch tar kupp, rån, inbrott och angrepp (mybank rad 213-218). 'räd' ignorerades helt.
+      // kupp är @willebus och angrepp är @zero-cool, så vi tar 'rån' som ingen använder.
+      const r = board.emit('rån', { mål: 'Banken', plats: 'Banken', enheter, styrka,
         text: `Sockergardet går mot Banken med ${enheter.join(', ')}. Vi vet att lasernätet står.` });
       logga(`räd mot Banken med ${enheter.join(', ')}`, r && r.message ? { id: r.message.id } : { nekad: true });
       spara();
       return svara(res, { ok: !!(r && r.message), postat: r && r.message ? r.message.id : null,
-        varning: 'Banken avvärjer alltid och fakturerar oss. Ett rån flyttar pengar åt fel håll.' });
+        varning: 'Banken avvärjer alltid, fakturerar oss och sänker vår kreditvärdighet 10. '
+               + 'Pengarna går åt fel håll. Det enda försvaret som biter mot en bank är att inte låna.' });
     }
 
     // Människan vid storskärmen fyller silon. Det är fabrikens enda ingång utifrån.
