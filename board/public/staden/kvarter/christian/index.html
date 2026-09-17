@@ -106,7 +106,7 @@
 </div>
 
 <div class="gravar" id="gravar" hidden>
-  <div class="e">Gravar som blev socker</div>
+  <div class="e">Råvara från staden</div>
   <ul id="gravarLista"></ul>
 </div>
 
@@ -161,10 +161,11 @@ function ritaGravar(gravar, pott) {
   const box = document.getElementById('gravar');
   box.hidden = !gravar.length;
   if (!gravar.length) return;
-  box.querySelector('.e').textContent = `Gravar som blev socker${pott ? ` · ${pott} kg i potten` : ''}`;
+  box.querySelector('.e').textContent = `Råvara från staden${pott ? ` · ${pott} kg i potten` : ''}`;
   document.getElementById('gravarLista').innerHTML = gravar.slice(0, 5).map(g =>
-    `<li><span class="kg">${esc(g.kg)} kg</span><span class="vem">${esc(g.från)}</span>`
-    + `<span class="v">${g.fitness != null ? `fitness ${esc(g.fitness)} · ` : ''}${esc(g.varför || '')}</span></li>`
+    `<li><span class="kg">${esc(g.kg)} kg</span><span class="vem">${esc(g.sort || 'avfall')}</span>`
+    + `<span class="v">${esc(g.från || '')}${g.fitness != null ? ` · fitness ${esc(g.fitness)}` : ''}`
+    + `${g.varför ? ' · ' + esc(g.varför) : ''}</span></li>`
   ).join('');
 }
 

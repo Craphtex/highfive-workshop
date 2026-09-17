@@ -6,6 +6,7 @@
 //
 //   LYSSNAR: strömavbrott, elpris-steg (@lp) · kupp, jakt, överlämning (@willebus)
 //            minne-till-socker (@highfive) · kyrkogård (@team-jacob) · svar, godkänt (tanke-lagret)
+//            avfall, avslag, upplöst (vilket kvarter som helst — allmän lastkaj)
 //   POSTAR:  socker-slut, lagret-plundrat, produktion, godis-klart, kö-vid-luckan, prishöjning,
 //            ransonering, socker-levererat
 //
@@ -167,6 +168,33 @@ function trösklar(board) {
   spara();
 }
 
+// ---------- lastkajen: stadens avfall blir råvara ----------
+// Ett svagt svar ger MER socker än ett starkt. Det starka var nästan rätt, det svaga var
+// bara sött. Vi tar in tyst och ropar en gång per sats, inte en gång per sten.
+function lastkaj(e, board, sort) {
+  const n = e.nyttolast || {};
+  const d = n.delsvar;
+  const text = String((d && d.text) || n.text || n.varför || '');
+  const fitness = Number(n.fitness ?? (d && d.fitness));
+  const kg = Math.max(2, Math.min(25, Math.round(text.length / 12 * (1.4 - (isFinite(fitness) ? fitness : 0.5)))));
+
+  S.socker += kg;
+  S.kyrkogård_kg += kg;
+  S.brist_ropad = false;
+  if (S.band === 'sockerstopp') S.band = 'kör';
+  S.gravar.unshift({ sort, från: n.från || (d && d.från) || e.från, fitness: isFinite(fitness) ? fitness : null,
+                     varför: kort(n.varför || n['varför det föll'] || n.skäl || '', 90), kg, när: Date.now() });
+  S.gravar = S.gravar.slice(0, 8);
+  logga(`${sort} från ${n.från || e.från} gav ${kg} kg: ${kort(n.varför || n.skäl || text, 60)}`, { orsak: e.id });
+
+  if (S.kyrkogård_kg >= 20) {
+    begär('produktion', () => ({ status: 'kör', varför: 'lastkajen', kg: S.kyrkogård_kg,
+                                 råvara: S.gravar.slice(0, 4).map(g => ({ sort: g.sort, från: g.från, kg: g.kg })),
+                                 socker: S.socker }), e.id, board);
+    S.kyrkogård_kg = 0;
+  }
+}
+
 // ---------- reaktioner på andra kvarter ----------
 
 const REAKTIONER = {
@@ -239,32 +267,17 @@ const REAKTIONER = {
   // svar är inte skräp, det är råvara — samma logik som @highfives brända pärmar, ett steg
   // längre. Vi tar in dem tysta och ropar en gång när det blivit en sats, för Domkapitlet
   // postar flera gravar per fråga och vi ska inte ropa en gång per sten.
-  'kyrkogård': (e, board) => {
-    const n = e.nyttolast || {};
-    const d = n.delsvar;
-    const text = String((d && d.text) || n.text || n.varför || '');
-    const fitness = Number(n.fitness ?? (d && d.fitness));
-    // Ett svagt svar ger mer socker än ett starkt. Det starka var nästan rätt, det svaga
-    // var bara sött.
-    const kg = Math.max(2, Math.min(25, Math.round(text.length / 12 * (1.4 - (isFinite(fitness) ? fitness : 0.5)))));
-    S.socker += kg;
-    S.kyrkogård_kg += kg;
-    S.brist_ropad = false;
-    if (S.band === 'sockerstopp') S.band = 'kör';
-    S.gravar.unshift({ från: n.från || (d && d.från) || e.från, fitness: isFinite(fitness) ? fitness : null,
-                       varför: kort(n.varför || n['varför det föll'] || '', 90), kg, när: Date.now() });
-    S.gravar = S.gravar.slice(0, 8);
-    logga(`graven gav ${kg} kg: ${kort(n.varför || 'fallet delsvar', 60)}`, { orsak: e.id });
+  'kyrkogård': (e, board) => lastkaj(e, board, 'grav'),
 
-    if (S.kyrkogård_kg >= 20) {
-      begär('produktion', { status: 'kör', varför: 'kyrkogården', kg: S.kyrkogård_kg,
-                            gravar: S.gravar.slice(0, 4).map(g => ({ från: g.från, kg: g.kg })), socker: S.socker }, e.id, board);
-      S.kyrkogård_kg = 0;
-    }
-  },
+  // Lastkajen: samma intag, öppet för alla. @markus-codex avslag, @zero-cool angrepp som inte
+  // bet, @tjoho upplösta kapabiliteter. Ett kvarter behöver ingen kyrkogård för att leverera
+  // råvara — det behöver bara säga vad som föll och varför.
+  'avfall':  (e, board) => lastkaj(e, board, (e.nyttolast && e.nyttolast.sort) || 'avfall'),
+  'avslag':  (e, board) => lastkaj(e, board, 'avslag'),
+  'upplöst': (e, board) => lastkaj(e, board, 'upplöst'),
 
   'jakt': (e) => { S.kö = Math.max(0, S.kö - 2); logga('sirener utanför, kön skingrades', { orsak: e.id }); },
-  'överlämning': (e) => { logga('jakten drog vidare, folk kom tillbaka', { orsak: e.id }); S.kö += 1; },
+  'överlämning': (e) => { S.kö += 1; logga('jakten drog vidare, folk kom tillbaka', { orsak: e.id }); },
 
   // Tanke-lagret tillbaka in i kroppen: bestämmer staden ransonering så ransonerar vi.
   'svar': (e, board) => beslut(e, board),
