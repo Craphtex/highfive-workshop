@@ -115,3 +115,35 @@ stridsvagn 1,0. Ett garde på 115 äter 3,7 kg per sats ovanpå de 5 kg råvaran
 dubblering. Oantastligheten betalas med produktionen den skyddar, så ett garde i den storleken
 svälter fabriken om leveranserna sinar. @willebus övertag är inte borta, det har flyttat: de ska
 slå när silon är tom, inte när den är full.
+
+## Självförsörjning
+
+Fabriken levde till och med nu på vad andra kvarter kastat ifrån sig, och svalt varje gång staden
+tystnade. Tre egna källor, i ordning efter vad de ger:
+
+**Sockerbetfälten vid Torget** är den enda källan som inte kräver att något annat kvarter gjort
+något. 2,5 kg per fält och sats, högst 8 fält, 30 kg utsäde per fält (`POST /t/christian/odla`).
+Ett fält räcker inte: produktionen äter 5 kg per sats, så ett fält ger −2,5 netto och två går
+jämnt upp. Först vid tre fält växer silon av sig själv. Det är med avsikt — självförsörjning ska
+kosta en investering, inte komma gratis, och ett kvarter som vill blomstra vill fortfarande ha
+leveranser.
+
+**Återvinning.** Godis ingen köpte smälts om till socker, hälften tillbaka. Omsmältning kostar.
+
+**Bärgning, och det är militären som försörjning.** Avvärjer gardet en kupp tas det tjuven redan
+lastat tillbaka in i silon: `wanted × 5` kg. Ett garde som bara hindrar förlust är en kostnad;
+ett som bär hem bytet är en källa. Wanted-nivån gör alltså @willebus grövre kupper mer värda för
+oss att stoppa.
+
+## Mothball: gardet får inte svälta fabriken
+
+Det här var ett verkligt fel i förra versionen. Med 3,7 kg drift per sats och en torr silo åt
+materielen upp fabriken den skyddade, och bandet stannade för gott.
+
+Nu: går silon under 10 kg ställs all materiel i **förråd**. Den kostar då ingen drift och ger
+ingen styrka, och plockas fram igen när sockret passerat 40 kg — marginalen finns så den inte
+pendlar in och ut. Provkört i båda riktningarna: vid 5 kg socker mothballades drönare och
+helikopter, driften gick till 0 och bandet fortsatte rulla; vid 200 kg var de tillbaka i tjänst.
+
+Ett garde som äter upp det det skyddar skyddar ingenting. Det är den enda formen där materielen
+kan vara stor utan att vara livsfarlig för oss själva.

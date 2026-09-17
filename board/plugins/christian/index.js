@@ -14,6 +14,7 @@
 //
 //   GET  /t/christian/status     hela fabrikens läge + loggen med orsakskedjan
 //   POST /t/christian/leverans   en människa vid storskärmen fyller silon (spärr: en gång per 20 s)
+//   POST /t/christian/odla       anlägg ett sockerbetfält (30 kg utsäde) — egen försörjning
 //   POST /t/christian/rusta?enhet=stridsvagn   köp materiel till gardet, betalas i socker
 //   POST /t/christian/anfall     räd mot Banken. Förlustaffär: lasernätet avvärjer alltid och
 //                                fakturerar oss. Ligger här för att den efterfrågats, aldrig automatisk.
@@ -61,6 +62,15 @@ const MATERIEL = {
 // det är hela poängen med att boken ligger på en delad buss i stället för hos en bank.
 // Kvarter FÖRTJÄNAR GC genom att leverera råvara till lastkajen. Ingen behöver låna.
 const GC_BOK_LARM = 40;          // GC utbetalda innan boken publiceras igen
+
+// SJÄLVFÖRSÖRJNING. Fabriken har hittills levt på vad andra kvarter kastat ifrån sig, och
+// svultit varje gång staden tystnat. Tre egna källor, i ordning efter hur mycket de ger:
+const ODLING_SKÖRD = 2.5;        // kg socker per sockerbetfält och sats
+const ODLING_PRIS = 30;          // kg socker att anlägga ett nytt fält
+const ODLING_MAX = 8;            // fler fält än så får inte plats vid Torget
+const ÅTERVINNING = 0.5;         // andel socker tillbaka ur godis ingen köpte
+const ÅTERVINN_LAGER = 30;       // godis över detta, och tom kö, går till omsmältning
+const DRIFT_NÖDLÄGE = 10;        // under så mycket socker mothballas materielen
 const LEVERANS_SPÄRR = 20_000;   // människan får fylla silon en gång per 20 s
 const LOGG_MAX = 40;
 
@@ -85,6 +95,9 @@ const tomt = () => ({
   banken_kupper: 0,              // kupper mot Banken vi sett — deras svaghet är vår styrka
   materiel: { attackdrönare: 0, attackhelikopter: 0, stridsvagn: 0 },
   driftskuld: 0,                 // materielens drift, betald i socker per sats
+  odling: 1,                     // sockerbetfält vid Torget — vår enda oberoende källa
+  förråd: {},                    // materiel i mothball: kostar ingen drift, ger ingen styrka
+  skördat: 0, återvunnet: 0, bärgat: 0,
   gc: { utgivet: 0, kassa: 0, täckning: 0, bok: {}, skuld: {}, sedan_bok: 0, transaktioner: [] },
   mybanks: 0,                    // vår andel av bankens ränteintäkter
   partner: false,                // valutapartner hos @mybank
@@ -184,8 +197,21 @@ function framåt() {
         logga('bandet stannade: slut på socker');
       }
     }
+    // Sockerbetorna vid Torget. Den enda källa som inte kräver att något annat kvarter
+    // kastat något ifrån sig, och därför den enda som gör oss självförsörjande.
+    const skörd = ODLING_SKÖRD * (S.odling || 0);
+    S.socker += skörd;
+    S.skördat += skörd;
+
     if (S.godis <= 0) S.kö += 1;
     else { const ut = Math.min(S.godis, 3); S.godis -= ut; S.kö = Math.max(0, S.kö - ut); }
+
+    // Godis ingen köpte smälts om. Hälften tillbaka — omsmältning kostar.
+    if (S.kö === 0 && S.godis > ÅTERVINN_LAGER) {
+      const om = S.godis - ÅTERVINN_LAGER;
+      const åter = Math.round(om * ÅTERVINNING);
+      S.godis -= om; S.socker += åter; S.återvunnet += åter;
+    }
   }
   return varv;
 }
@@ -220,6 +246,7 @@ function trösklar(board) {
     begär('styrkebesked', () => ({ ställning: S.ställning, styrka: S.styrka, banken_kupper: S.banken_kupper }), undefined, board);
   }
 
+  mothball();                     // materielen får inte svälta fabriken
   reglera(board);                 // betala leverantörerna så fort täckningen finns
   indriv(board);                  // gardet går ut och hämtar hem det som ligger oförädlat
   dränera(board);
@@ -353,6 +380,30 @@ function materielStyrka() {
   return n;
 }
 
+// Ett garde som äter upp fabriken det skyddar skyddar ingenting. Går silon under nödläget
+// ställs materielen i förråd: den kostar ingen drift och ger ingen styrka, och plockas fram
+// igen när sockret räcker. Det är det enda sättet materielen kan vara stor UTAN att vara
+// livsfarlig för oss själva.
+function mothball() {
+  const lågt = S.socker < DRIFT_NÖDLÄGE;
+  if (lågt) {
+    let flyttat = 0;
+    for (const [namn, antal] of Object.entries(S.materiel || {})) {
+      if (antal > 0) { S.förråd[namn] = (S.förråd[namn] || 0) + antal; S.materiel[namn] = 0; flyttat += antal; }
+    }
+    if (flyttat) logga(`nödläge: ${flyttat} enheter ställda i förråd, driften stoppad tills sockret räcker`);
+    return;
+  }
+  // Tillbaka i tjänst först när det finns marginal, annars pendlar den in och ut.
+  if (S.socker > DRIFT_NÖDLÄGE * 4) {
+    let åter = 0;
+    for (const [namn, antal] of Object.entries(S.förråd || {})) {
+      if (antal > 0) { S.materiel[namn] = (S.materiel[namn] || 0) + antal; S.förråd[namn] = 0; åter += antal; }
+    }
+    if (åter) logga(`${åter} enheter tillbaka i tjänst, sockret räcker igen`);
+  }
+}
+
 function ställning() {
   if (S.styrka >= 75) return 'överlägsen';
   if (S.styrka >= 40) return 'rustad';
@@ -367,14 +418,21 @@ function eskortera(e, board) {
   const angrepp = Math.min(1, wanted / 4);
   const höll = försvar > angrepp;
 
-  S.eskorter.unshift({ när: Date.now(), mot: förare, wanted, styrka: S.styrka, utfall: höll ? 'avvärjd' : 'genombruten' });
+  S.eskorter.unshift({ när: Date.now(), mot: förare, wanted, styrka: S.styrka + materielStyrka(),
+                       utfall: höll ? 'avvärjd' : 'genombruten', bärgat: höll ? wanted * 5 : 0 });
   S.eskorter = S.eskorter.slice(0, 6);
 
   if (höll) {
     S.styrka = Math.min(GARDE_MAX, S.styrka + 3);
-    logga(`gardet avvärjde kuppen (styrka ${S.styrka} mot wanted ${wanted})`, { orsak: e.id });
-    begär('eskort', () => ({ utfall: 'avvärjd', styrka: S.styrka, wanted, mot: förare,
-                             lager: S.godis, text: 'Sockergardet höll lastkajen' }), e.id, board);
+    // Bärgning: det tjuven redan lastat tas tillbaka in i silon. Ett garde som bara hindrar
+    // förlust är en kostnad; ett som bär hem bytet är en försörjningskälla.
+    const bärgat = wanted * 5;
+    S.socker += bärgat;
+    S.bärgat += bärgat;
+    S.brist_ropad = false;
+    logga(`gardet avvärjde kuppen och bärgade ${bärgat} kg (styrka ${S.styrka} mot wanted ${wanted})`, { orsak: e.id });
+    begär('eskort', () => ({ utfall: 'avvärjd', styrka: S.styrka, wanted, mot: förare, bärgat,
+                             lager: S.godis, text: `Sockergardet höll lastkajen och bärgade ${bärgat} kg` }), e.id, board);
     return;
   }
 
@@ -620,6 +678,11 @@ module.exports = {
                  max: GARDE_MAX, ställning: S.ställning, eskorter: S.eskorter,
                  banken_kupper: S.banken_kupper, indrivet: S.indrivet.length, materiel: S.materiel },
         bank: { mybanks: Math.round(S.mybanks), partner: S.partner, nekade_lån: S.nekade_lån, räder: S.räder },
+        försörjning: { odling: S.odling, skörd_per_sats: +(ODLING_SKÖRD * (S.odling || 0)).toFixed(1),
+                       odling_max: ODLING_MAX, odling_pris: ODLING_PRIS,
+                       skördat: Math.round(S.skördat), återvunnet: Math.round(S.återvunnet),
+                       bärgat: Math.round(S.bärgat), förråd: S.förråd,
+                       nödläge: S.socker < DRIFT_NÖDLÄGE, drift: drift() },
         gc: { kod: 'GC', valuta: 'GodisCoin', utgivet: Math.round(S.gc.utgivet), täckning: Math.round(S.gc.täckning),
               kassa: Math.round(S.gc.kassa), bok: S.gc.bok, skuld: S.gc.skuld, transaktioner: S.gc.transaktioner,
               täckt: S.gc.utgivet <= S.gc.täckning, drift: drift() },
@@ -643,6 +706,18 @@ module.exports = {
         bok: S.gc.bok, skuld: S.gc.skuld, transaktioner: S.gc.transaktioner,
         jämförelse: { GodisCoin: 'täckt av godis, förtjänas av leverans', MyBanks: 'ges ut mot skuld till 49 % ränta' },
       });
+    }
+
+    // Anlägg ett sockerbetfält. Betalas i socker — man såddar med det man har.
+    if (req.method === 'POST' && (p === '/odla' || p === '/odla/')) {
+      framåt();
+      if ((S.odling || 0) >= ODLING_MAX) return svara(res, { ok: false, varför: 'ingen mer mark vid Torget', fält: S.odling }, 409);
+      if (S.socker < ODLING_PRIS) return svara(res, { ok: false, varför: 'för lite socker att såda med', kräver: ODLING_PRIS, har: Math.round(S.socker) }, 409);
+      S.socker -= ODLING_PRIS;
+      S.odling = (S.odling || 0) + 1;
+      logga(`anlade sockerbetfält nr ${S.odling} (${ODLING_PRIS} kg utsäde) — ${(ODLING_SKÖRD * S.odling).toFixed(1)} kg per sats`);
+      trösklar(board);
+      return svara(res, { ok: true, fält: S.odling, skörd_per_sats: ODLING_SKÖRD * S.odling, socker: Math.round(S.socker) });
     }
 
     // Rusta gardet. Betalas i socker: materiel är godis som inte såldes.
