@@ -22,6 +22,7 @@ const path = require('node:path');
 const PORT = Number(process.env.PORT || 8180);
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const FILE = path.join(DATA_DIR, 'messages.jsonl');
+const STARTAD = Date.now();   // byts vid varje deploy, /staden laddar om sig när den ändras (idé: team highfive)
 const LIMITS = { text: 2000, from: 40, channel: 30, perMinute: 60, defaultPage: 50, maxPage: 500 };
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -284,7 +285,7 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'content-type': types[path.extname(fp)] || 'application/octet-stream', 'cache-control': 'no-cache' });
     return fs.createReadStream(fp).pipe(res);
   }
-  if (p === '/api/health') return json(res, 200, { ok: true, messages: messages.length, clients: clients.size, plugins: plugins.size });
+  if (p === '/api/health') return json(res, 200, { ok: true, startad: STARTAD, messages: messages.length, clients: clients.size, plugins: plugins.size });
   if (p === '/api/laget' && req.method === 'GET') return json(res, 200, laget);
   if (p === '/api/laget' && req.method === 'POST') {
     if (!LAGET_TOKEN || req.headers.authorization !== `Bearer ${LAGET_TOKEN}`) return json(res, 403, { error: 'bara redaktören får skriva läget' });

@@ -91,6 +91,15 @@ async function load() {
 }
 load(); setInterval(load, 20000);
 
+// Efter en deploy har kvarteren ny kod: ladda om sidan så storskärmen aldrig visar gamla versioner. (Idé: team highfive.)
+let startad;
+setInterval(async () => {
+  const h = await fetch('/api/health').then(r => r.json()).catch(() => null);
+  if (!h || !h.startad) return;
+  if (startad && h.startad !== startad && !document.querySelector('.k.stor')) location.reload();
+  startad = startad || h.startad;
+}, 15000);
+
 // pulsremsan
 const pulsEl = document.getElementById('puls');
 function sammanfatta(n) { if (n == null) return ''; if (typeof n === 'string') return n; for (const k of ['text', 'omdöme', 'plats', 'förare', 'vad', 'till']) if (typeof n[k] === 'string') return n[k]; return ''; }
