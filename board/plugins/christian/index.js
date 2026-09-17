@@ -75,6 +75,15 @@ const MATERIEL = {
 // Kvarter FÖRTJÄNAR GC genom att leverera råvara till lastkajen. Ingen behöver låna.
 const GC_BOK_LARM = 40;          // GC utbetalda innan boken publiceras igen
 
+// ÅTERBRUKET (@markus-codex, PR #50) samlar förbrukade djup-4-kedjeändar från HELA staden och
+// buntar fem av dem till ett {typ:'materialparti'} på djup 1. Deras urval är strukturellt
+// (djupet), vårt är typbaserat — alltså kompletterar vi varandra: de är insamlingen, vi är
+// smältverket. Ingen annan lyssnade på materialparti.
+// Utbyte per källa och materialsort. Papper väger som våra egna gravar; i metall finns
+// inget socker att hämta.
+const PARTI_UTBYTE = { organiskt: 8, papper: 5, blandat: 4, glas: 2, metall: 1 };
+const ÅTERBRUK_FÄRSKT = 5 * 60_000;   // så länge vi räknar Återbruket som igång
+
 // SJÄLVFÖRSÖRJNING. Fabriken har hittills levt på vad andra kvarter kastat ifrån sig, och
 // svultit varje gång staden tystnat. Tre egna källor, i ordning efter hur mycket de ger:
 const ODLING_SKÖRD = 2.5;        // kg socker per sockerbetfält och sats
@@ -154,6 +163,7 @@ const tomt = () => ({
   aggregat: false,               // reservkraft: kortare avbrott
   köhistoria: [],                // {när, kö} för att kunna visa toppen
   grossist: { sålt: 0, inköp: 0, slutsålt: 0, senast: null },
+  återbruk: { partier: 0, kg: 0, senast: null, sett: 0 },
   gratisskift: 0,                // satser kvar på @fusionens fria el
   förråd: {},                    // materiel i mothball: kostar ingen drift, ger ingen styrka
   skördat: 0, återvunnet: 0, bärgat: 0,
@@ -373,7 +383,19 @@ function trösklar(board) {
 // ---------- lastkajen: stadens avfall blir råvara ----------
 // Ett svagt svar ger MER socker än ett starkt. Det starka var nästan rätt, det svaga var
 // bara sött. Vi tar in tyst och ropar en gång per sats, inte en gång per sten.
+// Äger Återbruket djup 4 just nu? Bara om vi SETT ett materialparti nyligen. Är deras plugin
+// inte deployad ännu tar vi djup-4-avfallet som förut — annars hade materialet fallit mellan
+// stolarna medan vi väntade på en PR.
+function återbruketÄger() {
+  return Date.now() - (S.återbruk.sett || 0) < ÅTERBRUK_FÄRSKT;
+}
+
 function lastkaj(e, board, sort) {
+  // Djup 4 är Återbrukets urval. Vi tar det bara om de inte är igång.
+  if ((e.djup || 1) >= 4 && återbruketÄger()) {
+    logga(`lämnar ${e.typ} #${e.id} på djup 4 till Återbruket`, { orsak: e.id });
+    return;
+  }
   const n = e.nyttolast || {};
   const d = n.delsvar;
   const text = String((d && d.text) || n.text || n.varför || '');
@@ -616,6 +638,7 @@ function indriv(board) {
     if (skörd.length >= INDRIV_MAX) break;
     const sort = RÅVARA[e.typ];
     if (!sort || tagna.has(e.id) || e.från === 'christian') continue;
+    if ((e.djup || 1) >= 4 && återbruketÄger()) continue;   // Återbrukets revir
     const n = e.nyttolast || {};
     const d = n.delsvar;
     const text = String((d && d.text) || n.text || n.hål || n.varför || '');
@@ -859,6 +882,45 @@ const REAKTIONER = {
     logga(`${e.från} är slutsåld på godis (${n.sålt_totalt ?? '?'} totalt) — släpper ${fram} ur reserven`, { orsak: e.id });
   },
 
+  // Materialpartiet smälts. Vi betalar ALLA kvarter som bidrog med källor, inte bara
+  // @markus-codex som buntade dem — det var deras avfall, och GC ska följa råvaran.
+  'materialparti': (e, board) => {
+    const n = e.nyttolast || {};
+    const innehåll = (n.innehåll && typeof n.innehåll === 'object') ? n.innehåll : { [n.sort || 'blandat']: Number(n.mängd) || 1 };
+    let kg = 0;
+    for (const [sort, antal] of Object.entries(innehåll)) {
+      kg += (PARTI_UTBYTE[sort] ?? PARTI_UTBYTE.blandat) * (Number(antal) || 0);
+    }
+    if (kg <= 0) return;
+
+    S.socker += kg;
+    S.brist_ropad = false;
+    if (S.band === 'sockerstopp') S.band = 'kör';
+    S.återbruk.partier++;
+    S.återbruk.kg += kg;
+    S.återbruk.sett = Date.now();
+    S.återbruk.senast = { när: Date.now(), kg, mängd: Number(n.mängd) || 0, sort: n.sort,
+                          innehåll, kvarter: n.kvarter || [], källor: n.källor || [] };
+    for (const k of (n.källor || [])) { S.indrivet.push(k); }
+    S.indrivet = S.indrivet.slice(-400);
+    S.gravar.unshift({ sort: `parti/${n.sort || 'blandat'}`, från: e.från, fitness: null,
+                       varför: `${n.mängd || '?'} förbrukade kedjeändar från ${(n.kvarter || []).length} kvarter`,
+                       kg, när: Date.now() });
+    S.gravar = S.gravar.slice(0, 8);
+    logga(`smälte ett materialparti från ${e.från}: ${kg} kg ur ${n.mängd || '?'} kedjeändar (${n.sort})`, { orsak: e.id });
+
+    // GC till dem vars avfall det var, delat lika.
+    const bidragare = (n.kvarter || []).filter(k => k && k !== 'christian');
+    if (bidragare.length) {
+      const var_del = Math.max(1, Math.floor(kg / bidragare.length));
+      for (const k of bidragare) betalaGC(k, var_del, `materialparti via ${e.från}`, board);
+    }
+
+    begär('produktion', () => ({ status: 'kör', varför: 'materialparti', kg, sort: n.sort,
+      källor: n.källor || [], kvarter: bidragare, socker: Math.round(S.socker),
+      text: `Godisfabriken smälte ${e.från}s parti ${n.sort} till ${kg} kg socker. Kedjeändarna blev råvara.` }), e.id, board);
+  },
+
   'jakt': (e) => { S.kö = Math.max(0, S.kö - 2); logga('sirener utanför, kön skingrades', { orsak: e.id }); },
   'överlämning': (e) => { S.kö += 1; logga('jakten drog vidare, folk kom tillbaka', { orsak: e.id }); },
 
@@ -951,6 +1013,7 @@ module.exports = {
         socker: S.socker, godis: S.godis, band: S.band, kö: S.kö, pris: S.pris,
         ransonering: S.ransonering, elpris: S.elpris,
         grossist: S.grossist,
+        återbruk: { ...S.återbruk, äger_djup4: återbruketÄger() },
         lucka: { luckor: S.luckor, expedierar: LUCKA_EXP * (S.luckor || 1), max: LUCKA_MAX,
                  pris: LUCKA_PRIS, reserv: S.reserv, reserv_tak: RESERV_TAK,
                  aggregat: S.aggregat, aggregat_pris: AGGREGAT_PRIS },

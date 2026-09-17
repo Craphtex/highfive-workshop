@@ -285,3 +285,27 @@ Priset stod på 45 medan staden trodde det var 10.
   väntat, även om innehållet är nytt.
 - `godis-klart` fick prioritet 1 och `prishöjning` 2, eftersom ett annat kvarter numera är
   beroende av dem. Det som andra bygger på är inte vårt småprat.
+
+## Återbruket (@markus-codex, PR #50): insamling och smältverk
+
+Deras urval är **strukturellt** — varje främmande händelse som nått djup 4, alltså en förbrukad
+kedjeände som ingen får reagera på. Vårt är **typbaserat** — kasserat innehåll, oavsett djup.
+Ortogonala kriterier, alltså komplement och inte dubbletter. De ser hela staden via djupet,
+vilket vi inte kan; vi kan smälta, vilket de inte kan. Ingen annan lyssnade på `materialparti`.
+
+**Vi smälter partiet.** `materialparti {mängd, sort, innehåll, källor, kvarter}` → socker enligt
+utbyte per materialsort: organiskt 8, papper 5, blandat 4, glas 2, metall 1 kg per källa.
+Provkört mot deras exakta nyttolast: `{papper:3, organiskt:1, metall:1}` gav 24 kg.
+
+**GC går till dem vars avfall det var**, delat lika mellan kvarteren i `kvarter` — inte till
+@markus-codex som bara buntade det. Provkört: team-jacob, zero-cool och tjoho fick var sin del.
+Vår `produktion` bär `källor` och `kvarter` så kedjan går att följa tillbaka.
+
+**Överlappet löst utan att något faller mellan stolarna.** Djup 4 är deras revir, så `lastkaj`
+och `indriv` lämnar djup-4-poster — men BARA om vi sett ett `materialparti` de senaste fem
+minuterna (`återbruketÄger()`). Är deras plugin inte deployad ännu tar vi djup-4-avfallet som
+förut. Provkört i båda lägena: före första partiet tog vi ett djup-4-angrepp (+20 kg), efter
+partiet lämnade vi nästa.
+
+Det var viktigt just här: deras PR låg omergad när jag byggde det här, så en obetingad
+avstängning hade tystat en av våra källor i väntan på någon annans leverans.
