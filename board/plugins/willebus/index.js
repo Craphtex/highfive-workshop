@@ -76,21 +76,77 @@ module.exports = {
     }
     // Kasinot: spela den enarmade banditen. Delad jackpot, tre 🚔 startar en razzia.
     if (req.method === 'POST' && p === '/snurra') {
-      this._snurra(board);
+      const b = await this._body(req);
+      this._snurra(board, this._namn(b.spelare));
       return this._json(res, 200, this.state);
     }
     // Roulette: satsa på en färg och snurra hjulet direkt.
     if (req.method === 'POST' && p === '/rulett') {
       const b = await this._body(req);
       const färg = ['röd', 'svart', 'grön'].includes(b.färg) ? b.färg : 'röd';
-      this._rulett(board, färg);
+      this._rulett(board, färg, this._namn(b.spelare));
       return this._json(res, 200, this.state);
     }
     // Blackjack: ett delat bord som rummet spelar tillsammans.
-    if (req.method === 'POST' && p === '/bj-ny') { this._bjNy(board); return this._json(res, 200, this.state); }
+    if (req.method === 'POST' && p === '/bj-ny') { const b = await this._body(req); this._bjNy(board, this._namn(b.spelare)); return this._json(res, 200, this.state); }
     if (req.method === 'POST' && p === '/bj-hit') { this._bjHit(board); return this._json(res, 200, this.state); }
-    if (req.method === 'POST' && p === '/bj-stand') { this._bjStand(board); return this._json(res, 200, this.state); }
+    if (req.method === 'POST' && p === '/bj-stand') { const b = await this._body(req); this._bjStand(board, this._namn(b.spelare)); return this._json(res, 200, this.state); }
+    // Video poker (Jacks or Better): få fem kort, håll några, dra om resten.
+    if (req.method === 'POST' && p === '/poker-ny') { this._pokerNy(); return this._json(res, 200, this.state); }
+    if (req.method === 'POST' && p === '/poker-dra') { const b = await this._body(req); this._pokerDra(board, b.håll, this._namn(b.spelare)); return this._json(res, 200, this.state); }
     return false; // → 404
+  },
+
+  _nyLek() {
+    const lek = [];
+    for (const r of KORT_R) for (const s of KORT_S) lek.push(r + s);
+    for (let i = lek.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [lek[i], lek[j]] = [lek[j], lek[i]]; }
+    return lek;
+  },
+  _pokerNy() {
+    const lek = this._nyLek();
+    this.state.poker = { hand: lek.slice(0, 5), lek: lek.slice(5), status: 'dra', resultat: 'Håll korten du vill behålla och tryck Dra.', vinst: 0 };
+    this._spara();
+  },
+  _pokerDra(board, håll, spelare) {
+    const pk = this.state.poker;
+    if (!pk || pk.status !== 'dra') return;
+    const behåll = Array.isArray(håll) ? håll : [];
+    for (let i = 0; i < 5; i++) if (!behåll[i]) pk.hand[i] = pk.lek.pop();
+    const { namn, vinst } = this._pokerVärde(pk.hand);
+    pk.status = 'klar'; pk.resultat = vinst ? `${namn} — ${vinst} marker!` : `${namn}. Ingen vinst.`; pk.vinst = vinst;
+    if (vinst) this._registreraVinst(board, vinst, 'poker', spelare);
+    this._spara();
+  },
+  _pokerVärde(hand) {
+    const v = { A: 14, K: 13, Q: 12, J: 11, '10': 10, '9': 9, '8': 8, '7': 7, '6': 6, '5': 5, '4': 4, '3': 3, '2': 2 };
+    const värden = hand.map(k => v[k.slice(0, -1)]).sort((a, b) => a - b);
+    const färger = hand.map(k => k.slice(-1));
+    const antal = {}; värden.forEach(x => antal[x] = (antal[x] || 0) + 1);
+    const par = Object.values(antal).sort((a, b) => b - a);        // t.ex. [3,2]
+    const flush = färger.every(f => f === färger[0]);
+    const unika = [...new Set(värden)];
+    let straight = unika.length === 5 && (värden[4] - värden[0] === 4);
+    const wheel = unika.length === 5 && värden.join() === '2,3,4,5,14'; // A-2-3-4-5
+    if (wheel) straight = true;
+    const högstaPar = Number(Object.keys(antal).find(k => antal[k] >= 2) || 0);
+    if (straight && flush && värden[0] === 10) return { namn: 'ROYAL FLUSH', vinst: 500 };
+    if (straight && flush) return { namn: 'Straight flush', vinst: 300 };
+    if (par[0] === 4) return { namn: 'Fyrtal', vinst: 200 };
+    if (par[0] === 3 && par[1] === 2) return { namn: 'Kåk', vinst: 100 };
+    if (flush) return { namn: 'Flush', vinst: 70 };
+    if (straight) return { namn: 'Straight', vinst: 50 };
+    if (par[0] === 3) return { namn: 'Triss', vinst: 30 };
+    if (par[0] === 2 && par[1] === 2) return { namn: 'Två par', vinst: 20 };
+    if (par[0] === 2 && högstaPar >= 11) return { namn: 'Par (knekt+)', vinst: 10 };
+    return { namn: 'Inget', vinst: 0 };
+  },
+
+  _namn(v) { return (typeof v === 'string' && v.trim()) ? v.trim().slice(0, 24) : null; },
+  _kreditera(namn, belopp) {
+    if (!namn || !belopp) return;
+    this.state.spelare = this.state.spelare || {};
+    this.state.spelare[namn] = (this.state.spelare[namn] || 0) + belopp;
   },
 
   _bjKort() { return KORT_R[Math.floor(Math.random() * 13)] + KORT_S[Math.floor(Math.random() * 4)]; },
@@ -110,13 +166,13 @@ module.exports = {
     bj.spelarVärde = this._bjVärde(bj.spelarhand);
     bj.givarVärde = this._bjVärde(bj.givarhand);
   },
-  _bjNy(board) {
+  _bjNy(board, spelare) {
     const bj = this.state.bj;
     bj.spelarhand = [this._bjKort(), this._bjKort()];
     bj.givarhand = [this._bjKort(), this._bjKort()];
     bj.status = 'spelar'; bj.resultat = ''; bj.vinst = 0;
     this._bjUppdatera();
-    if (bj.spelarVärde === 21) { bj.status = 'klar'; bj.resultat = 'BLACKJACK! 50 marker.'; bj.vinst = 50; this._registreraVinst(board, 50, 'blackjack'); }
+    if (bj.spelarVärde === 21) { bj.status = 'klar'; bj.resultat = 'BLACKJACK! 50 marker.'; bj.vinst = 50; this._registreraVinst(board, 50, 'blackjack', spelare); }
     this._spara();
   },
   _bjHit() {
@@ -127,13 +183,13 @@ module.exports = {
     if (bj.spelarVärde > 21) { bj.status = 'klar'; bj.resultat = `Tjock på ${bj.spelarVärde} — givaren vinner.`; bj.vinst = 0; }
     this._spara();
   },
-  _bjStand(board) {
+  _bjStand(board, spelare) {
     const bj = this.state.bj;
     if (bj.status !== 'spelar') return;
     while (this._bjVärde(bj.givarhand) < 17) bj.givarhand.push(this._bjKort());
     this._bjUppdatera();
     const pv = bj.spelarVärde, gv = bj.givarVärde;
-    if (gv > 21 || pv > gv) { bj.vinst = 20; bj.resultat = `Du ${gv > 21 ? 'vann — givaren blev tjock' : 'vann ' + pv + ' mot ' + gv}! 20 marker.`; this._registreraVinst(board, 20, 'blackjack'); }
+    if (gv > 21 || pv > gv) { bj.vinst = 20; bj.resultat = `Du ${gv > 21 ? 'vann — givaren blev tjock' : 'vann ' + pv + ' mot ' + gv}! 20 marker.`; this._registreraVinst(board, 20, 'blackjack', spelare); }
     else if (pv === gv) { bj.vinst = 0; bj.resultat = `Lika på ${pv} — push.`; }
     else { bj.vinst = 0; bj.resultat = `Givaren vann ${gv} mot ${pv}.`; }
     bj.status = 'klar';
@@ -141,7 +197,7 @@ module.exports = {
   },
 
   // Roulette: 0 är grön, udda röd, jämn svart. Grön ger 14x, röd/svart 2x. Insats 10 marker.
-  _rulett(board, färg) {
+  _rulett(board, färg, spelare) {
     const r = this.state.rulett;
     const n = Math.floor(Math.random() * 37);                 // 0–36
     const utfall = n === 0 ? 'grön' : (n % 2 ? 'röd' : 'svart');
@@ -150,7 +206,7 @@ module.exports = {
       const vinst = utfall === 'grön' ? 140 : 20;
       r.senasteVinst = vinst;
       r.meddelande = `${n} ${utfall.toUpperCase()} — du satsade ${färg} och vann ${vinst} marker!`;
-      this._registreraVinst(board, vinst, 'roulette');
+      this._registreraVinst(board, vinst, 'roulette', spelare);
     } else {
       r.senasteVinst = 0;
       r.meddelande = `${n} ${utfall.toUpperCase()} — du satsade ${färg}. Ingen vinst.`;
@@ -159,9 +215,10 @@ module.exports = {
   },
 
   // Registrerar en vinst: topplista + (vid stor vinst) en casino-vinst-händelse till staden/nyheterna.
-  _registreraVinst(board, belopp, spel) {
+  _registreraVinst(board, belopp, spel, spelare) {
+    this._kreditera(spelare, belopp);
     this.state.topp = this.state.topp || [];
-    this.state.topp.push({ belopp, spel, tid: new Date().toISOString() });
+    this.state.topp.push({ belopp, spel, spelare: spelare || null, tid: new Date().toISOString() });
     this.state.topp.sort((a, b) => b.belopp - a.belopp);
     this.state.topp = this.state.topp.slice(0, 5);
     if (belopp >= 50) {
@@ -171,7 +228,7 @@ module.exports = {
   },
 
   // Enarmad bandit. Varje snurr matar jackpoten; tre lika vinner, tre 🚔 = razzia (startar en jakt).
-  _snurra(board) {
+  _snurra(board, spelare) {
     const k = this.state.kasino;
     const hjul = [0, 1, 2].map(() => HJUL[Math.floor(Math.random() * HJUL.length)]);
     k.snurr = (k.snurr || 0) + 1;
@@ -191,16 +248,16 @@ module.exports = {
         k.meddelande = `💰💰💰 JACKPOT! ${pott} marker!`;
         this._logga('kasino', `JACKPOT på banditen: ${pott} marker!`);
         k.jackpot = 100;                                 // pott återställs
-        this._registreraVinst(board, pott, 'jackpot');
+        this._registreraVinst(board, pott, 'jackpot', spelare);
       } else {
         k.senasteVinst = 50; k.utbetalt = (k.utbetalt || 0) + 50;
         k.meddelande = `${a}${a}${a} Tre i rad — 50 marker!`;
-        this._registreraVinst(board, 50, 'banditen');
+        this._registreraVinst(board, 50, 'banditen', spelare);
       }
     } else if (a === bb || bb === c || a === c) {
       k.senasteVinst = 10; k.utbetalt = (k.utbetalt || 0) + 10;
       k.meddelande = 'Par! 10 marker.';
-      this._registreraVinst(board, 10, 'banditen');
+      this._registreraVinst(board, 10, 'banditen', spelare);
     } else {
       k.senasteVinst = 0;
       k.meddelande = 'Ingen vinst. Snurra igen!';
@@ -432,7 +489,8 @@ module.exports = {
       kasino: { jackpot: 100, snurr: 0, senaste: null, senasteVinst: 0, utbetalt: 0, meddelande: 'Snurra för att spela!' },
       rulett: { senasteNummer: null, senasteFärg: null, senasteVinst: 0, snurr: 0, meddelande: 'Satsa på en färg och snurra.' },
       bj: { spelarhand: [], givarhand: [], spelarVärde: 0, givarVärde: 0, status: 'väntar', resultat: '', vinst: 0 },
-      topp: [],
+      poker: { hand: [], lek: [], status: 'väntar', resultat: '', vinst: 0 },
+      topp: [], spelare: {},
       platser, senaste: [], senasteHändelseTs: Date.now() };
   },
 

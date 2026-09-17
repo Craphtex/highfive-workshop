@@ -76,6 +76,45 @@ function kostnadFör(typ) {
   return typeof k === 'number' ? k : STANDARDKOSTNAD;
 }
 
+// ---------- dämpningen (mot brusloopen) ----------
+// @Majid pekade ut den: vi postar elpris-steg → mybank svarar räntehöjning
+// (med orsak = vårt elpris-steg) → vi tar full kostnad för räntehöjningen →
+// lasten stiger → nytt elpris-steg → mybank svarar igen → o.s.v. Vädret gjorde
+// priset kapabelt att falla, men bröt aldrig loopen — det gjorde bara att den
+// ibland gick åt andra hållet.
+//
+// Mekanismen: index.js avgör per inkommande händelse om den är ett EKO av oss
+// själva (dess `orsak` pekar på ett id VI nyligen postat — se _kommaIhågEgetEmit
+// i index.js) och håller en liten räknare per (från, typ) för hur många ekon i
+// rad som redan skett. Den här funktionen är den rena matten: given räknaren
+// INNAN den här händelsen och om den är ett eko, hur mycket ska den kosta och
+// vad blir nästa räknare.
+//
+//   FÖRSTA ekot (räknareInnan=0): faktor = BAS^0 = 1        → kostar FULLT
+//   andra                        : faktor = BAS^1 = 0.5     → hälften
+//   tredje                       : faktor = BAS^2 = 0.25    → en fjärdedel
+//   femte                        : faktor = BAS^4 = 0.0625  → "nästan ingenting"
+//
+// En händelse som INTE är ett eko (ärEko=false) återställer räknaren till 0
+// och kostar alltid fullt — det är så kravet "återhämtar sig" uppfylls: så
+// fort mybank slutar eka (eller bara pausar tillräckligt länge, se
+// DÄMPNING_GLÖM_MS i index.js) kostar deras nästa räntehöjning fullt igen,
+// ingen permanent avstängning.
+//
+// Och det är MEDVETET att bara EKON av oss själva dämpas, inte "samma typ
+// upprepad": en jakt som eskalerar (kupp/överlämning från Genomfarten, i skov,
+// när jakten korsar staden) citerar aldrig vårt elpris-steg som sin orsak —
+// den är inte ett svar på oss, den är sin egen berättelse. Den här dämpningen
+// rör den aldrig, oavsett hur många överlämningar som kommer i rad. Det är
+// skillnaden mellan en jakt som eskalerar och en bank som ekar.
+const DÄMPNING_BAS = 0.5;
+const DÄMPNING_GLÖM_MS = 3 * 60 * 1000; // tystnad på en (från,typ) så här länge glömmer streaken
+
+function dämpningsfaktor(räknareInnan, ärEko) {
+  if (!ärEko) return { faktor: 1, nyttRäknare: 0 };
+  return { faktor: Math.pow(DÄMPNING_BAS, räknareInnan), nyttRäknare: räknareInnan + 1 };
+}
+
 // ---------- vädret ----------
 // Elverkets enda kraft som kan SÄNKA lasten. Vädret byter LÅNGSAMT (några
 // gånger i timmen, se VÄDER_BYTE_*_MS i index.js) — ingen vädervägg på pulsen.
@@ -121,6 +160,49 @@ function slumpaVäder(föregående) {
   return val[Math.floor(Math.random() * val.length)];
 }
 
+// ---------- ström-varning ----------
+// Elverket är annars passivt — vi tar betalt och rapporterar, men ingen
+// BEHÖVER oss. En varning INNAN taket nås ger andra kvarter (@Christian,
+// @Marianne) ett beslut i stället för ett öde. sekunderKvar är bara en
+// uppskattning: hur lång tid till taket om lasten fortsätter öka i NUVARANDE
+// takt — inget mer avancerat än så, och "hellre ingen varning än en som ljuger".
+//
+// index.js/simulera.js håller själva tillståndsmaskinen (samma mönster som
+// avbrott/väderbyte redan gör), men delar de här konstanterna och ETA-formeln
+// så att "en varning per uppladdning" beter sig identiskt i simulering och
+// skarp drift:
+//   - NÄRHETSTRÖSKEL_FAKTOR: lasten måste vara minst denna andel av taket
+//     innan vi ens överväger en varning — ingen anledning att varna vid låg last.
+//   - TREND_FÖNSTER_MS: ökningstakten mäts som (last NU − last för såhär
+//     länge sedan) / förfluten tid — INTE tick-till-tick, för verkliga skov
+//     landar var 1-3:e sekund med urladdning emellan, så last pendlar upp och
+//     ner varje enskild tick även mitt i en het uppladdning. Ett litet
+//     glidande fönster (några sekunder) jämnar ut den naturliga pendlingen
+//     men fångar ändå en genuin flersekunders uppladdning. En enda studs
+//     (t.ex. en dämpad eko-räntehöjning, se dämpningen ovan) hinner sällan
+//     lyfta genomsnittet över fönstret tillräckligt för att trigga.
+//   - MAX_SEKUNDER: uppskattningen får inte peka längre bort än så här många
+//     sekunder — annars är den för osäker för att vara en äkta "varning".
+//   - ÅTERSTÄLLNINGSTRÖSKEL_FAKTOR: "redan varnat"-läget släpper först när
+//     lasten faller under DENNA (lägre) andel av taket — en ny uppladdning,
+//     en ny varning. Gapet mot NÄRHETSTRÖSKEL_FAKTOR är medvetet, annars
+//     skulle en last som studsar precis vid gränsen kunna trigga om och om igen.
+const VARNING_NÄRHETSTRÖSKEL_FAKTOR = 0.5;
+const VARNING_ÅTERSTÄLLNINGSTRÖSKEL_FAKTOR = 0.3;
+const VARNING_MAX_SEKUNDER = 25;
+const VARNING_TREND_FÖNSTER_MS = 5000;
+
+// Ren ETA-matte: last, tak, observerad ökningstakt (kr/sekund, NETTO efter
+// urladdning/väder) → sekunder kvar, eller null om gissningen vore orimlig
+// (lasten faller/står still, redan vid/över taket, eller inte ett användbart
+// ändligt positivt tal).
+function strömVarningSekunderKvar(last, tak, ökningstaktKrPerS) {
+  if (!(tak > 0) || !(ökningstaktKrPerS > 0)) return null;
+  if (last >= tak) return null;
+  const sekunder = (tak - last) / ökningstaktKrPerS;
+  return Number.isFinite(sekunder) && sekunder > 0 ? sekunder : null;
+}
+
 module.exports = {
   laddaUpp,
   urladda,
@@ -135,9 +217,17 @@ module.exports = {
   AVBROTT_VARAKTIGHET_S,
   ÅTERHÄMTNING_S,
   ÅTERHÄMTNING_FAKTOR,
+  DÄMPNING_BAS,
+  DÄMPNING_GLÖM_MS,
+  dämpningsfaktor,
   VÄDER_TYPER,
   VÄDER_PRODUKTION_KR_PER_S,
   solFaktor,
   väderEffektKrPerS,
   slumpaVäder,
+  VARNING_NÄRHETSTRÖSKEL_FAKTOR,
+  VARNING_ÅTERSTÄLLNINGSTRÖSKEL_FAKTOR,
+  VARNING_MAX_SEKUNDER,
+  VARNING_TREND_FÖNSTER_MS,
+  strömVarningSekunderKvar,
 };
