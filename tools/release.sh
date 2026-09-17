@@ -71,10 +71,10 @@ case "$cmd" in
     for nr in $(gh pr list -R "$REPO" --json number -q '.[].number' | sort -n); do
       git checkout -q main 2>/dev/null; git pull -q --ff-only origin main 2>/dev/null || true
       titel=$(gh pr view "$nr" -R "$REPO" --json title -q .title | cut -c1-70)
-      tools/release.sh check "$nr" > "/tmp/chk-$nr.txt" 2>&1; rc=$?; git checkout -q main 2>/dev/null
-      if [ $rc -eq 2 ]; then vantar+=("#$nr $titel — $(grep -c gemensam /tmp/chk-$nr.txt) gemensamma filer"); continue; fi
-      if [ $rc -ne 0 ]; then stoppade+=("#$nr $titel — $(grep -E 'ANNAT|HEMLIGHET|FALLERADE' /tmp/chk-$nr.txt | head -2 | tr '\n' ' ')"); continue; fi
-      traff=$(gh pr diff "$nr" -R "$REPO" | awk '/^diff --git a\/board\//{p=1} /^diff --git a\/projects\//{p=0} p' | grep -E '^\+' | grep -nE "$RISK" | grep -vE 'torget\.bjarby\.com|cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com|fonts\.(googleapis|gstatic)\.com|www\.w3\.org' | cut -c1-140 | head -3)
+      rc=0; tools/release.sh check "$nr" > "/tmp/chk-$nr.txt" 2>&1 || rc=$?; git checkout -q main 2>/dev/null || true
+      if [ $rc -eq 2 ]; then vantar+=("#$nr $titel — $(grep -c gemensam /tmp/chk-$nr.txt || true) gemensamma filer"); continue; fi
+      if [ $rc -ne 0 ]; then stoppade+=("#$nr $titel — $((grep -E 'ANNAT|HEMLIGHET|FALLERADE' /tmp/chk-$nr.txt || true) | head -2 | tr '\n' ' ')"); continue; fi
+      traff=$(gh pr diff "$nr" -R "$REPO" | awk '/^diff --git a\/board\//{p=1} /^diff --git a\/projects\//{p=0} p' | grep -E '^\+' | grep -nE "$RISK" | grep -vE 'torget\.bjarby\.com|cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com|fonts\.(googleapis|gstatic)\.com|www\.w3\.org' | cut -c1-140 | head -3 || true)
       if [ -n "$traff" ]; then vantar+=("#$nr $titel — riskmönster, läs själv: $traff"); continue; fi
       if ! gh pr merge "$nr" -R "$REPO" --squash > "/tmp/m-$nr.txt" 2>&1; then
         if grep -qi conflict "/tmp/m-$nr.txt"; then
