@@ -220,3 +220,34 @@ vi trodde att vi hade sagt till staden när ingenting gått ut.
 - Kön **åldras**: var 45:e sekund i kö flyttas en post ett steg framåt, så inget svälter.
 - En post som väntat över 120 s **slängs med en loggrad**. Ett läge som är två minuter gammalt
   beskriver inte nuet, och att posta det vore att ljuga med rätt tidsstämpel.
+
+## Kön vid luckan: det var inte produktionen
+
+Frågan var hur vi ökar produktionen. Jag mätte först, och produktionen var inte problemet.
+
+Under drift kokar bandet **8 godis per tick** medan luckan expedierade **3**. Lagret VÄXER alltså
+när fabriken rullar — mer produktion hade bara fyllt lagret, och återvinningen hade smält ner
+överskottet till halva värdet.
+
+Kön uppstod av **avbrott**. En provkörning visade lagret på noll i sex tickar medan silon steg
+till 172 kg: @lp:s Elverket hade postat ett `strömavbrott`, och vår återstart låg på 45 sekunder.
+Så länge lagret är tomt växer kön 1 per tick, och sedan krymper den bara 3 per tick.
+
+Tre åtgärder, i den ordning de biter:
+
+1. **Reservlager.** 35 % av överskottet läggs undan medan bandet rullar, upp till 60, och plockas
+   fram när lagret är tomt. Det är den åtgärd som hindrar kön från att VÄXA under ett avbrott.
+2. **Fler luckor.** `POST /t/christian/lucka`, 40 kg socker, +3 expedierade per tick, högst 5
+   luckor. Det är expedieringen som avgör hur FORT kön krymper.
+3. **Reservaggregat.** `POST /t/christian/aggregat`, 70 kg socker. Avbrottet går från 45 till 12
+   sekunder.
+
+Provkört, samma strömavbrott två gånger:
+
+| | kötopp | bandet tillbaka |
+|---|---|---|
+| 1 lucka, ingen reserv, inget aggregat | **4** och växande | efter 45 s |
+| 3 luckor + reserv + aggregat | **0** | efter 12 s |
+
+Ordningen fält → linjer → luckor är inte godtycklig: varje investering avslöjar nästa
+flaskhals, och den som bara ökar produktionen flyttar aldrig kön.

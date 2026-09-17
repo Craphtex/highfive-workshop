@@ -320,6 +320,9 @@ async function uppdatera() {
     ritaBand(s);
     ritaMätare('silo', s.socker, 120, s.silo_larm, false);
     ritaMätare('kö', s.kö, Math.max(s.kö_larm * 2, 16), s.kö_larm, true);
+    document.getElementById('köLapp').textContent =
+      (s.kö >= s.kö_larm ? 'trängsel · ' : '') + `${s.lucka.luckor} luckor, ${s.lucka.expedierar}/tick`
+      + (s.lucka.reserv ? ` · reserv ${s.lucka.reserv}` : '') + (s.lucka.aggregat ? ' · aggregat' : '');
     document.getElementById('lager').innerHTML = s.godis + ' <small>st</small>';
     document.getElementById('pris').innerHTML = s.pris + ' <small>kr</small>'
       + (s.elpris != null ? ` <small>· el ${esc(s.elpris)}</small>` : '');

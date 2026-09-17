@@ -84,6 +84,19 @@ const ÅTERVINNING = 0.5;         // andel socker tillbaka ur godis ingen köpte
 const ÅTERVINN_LAGER = 30;       // godis över detta, och tom kö, går till omsmältning
 const DRIFT_NÖDLÄGE = 10;        // under så mycket socker mothballas materielen
 
+// KÖN VID LUCKAN. Mätt, inte gissat: under drift producerar bandet 8 godis per tick medan
+// luckan expedierar 3, så lagret VÄXER när fabriken rullar. Kön uppstår inte av för låg
+// produktion — den uppstår när lagret töms av ett strömavbrott eller en kupp, växer 1 per
+// tick så länge lagret är tomt, och sedan kryper ner med bara 3 per tick.
+// Alltså tre åtgärder, i den ordning de biter:
+const LUCKA_EXP = 3;             // personer per lucka och tick
+const LUCKA_PRIS = 40;           // kg socker att öppna en lucka till
+const LUCKA_MAX = 5;
+const RESERV_ANDEL = 0.35;       // så stor del av överskottet läggs undan
+const RESERV_TAK = 60;           // reservlagrets storlek
+const AGGREGAT_PRIS = 70;        // kg socker för ett reservaggregat
+const AGGREGAT_MS = 12_000;      // med aggregat är bandet nere 12 s i stället för 45
+
 // LÖSENFONDEN. @mybank äger willebus till 100 % (utgåva 7 i Stadsbladet). Skulden gick från
 // 9 652 till 154 178 MyBanks på 49 % ränta, och banken köper dessutom smyg via bulvaner.
 // Ett rån mot Banken är bevisat meningslöst. Men deras EGEN publika route betalar av ett
@@ -134,6 +147,10 @@ const tomt = () => ({
   driftskuld: 0,                 // materielens drift, betald i socker per sats
   odling: 1,                     // sockerbetfält vid Torget — vår enda oberoende källa
   väder: null, väderfaktor: 1,   // @lp:s väder styr skörden
+  luckor: 1,                     // expedieringskapacitet
+  reserv: 0,                     // godislager som överlever ett strömavbrott
+  aggregat: false,               // reservkraft: kortare avbrott
+  köhistoria: [],                // {när, kö} för att kunna visa toppen
   gratisskift: 0,                // satser kvar på @fusionens fria el
   förråd: {},                    // materiel i mothball: kostar ingen drift, ger ingen styrka
   skördat: 0, återvunnet: 0, bärgat: 0,
@@ -274,8 +291,21 @@ function framåt() {
       prägla(S.ransonering ? Math.round(SATS_GODIS / 2) : SATS_GODIS);
     }
 
+    // Reserv: en del av överskottet läggs undan medan bandet rullar, och plockas fram när
+    // lagret är tomt. Det är den åtgärd som hindrar kön från att VÄXA under ett avbrott.
+    if (S.godis > 3 && S.reserv < RESERV_TAK) {
+      const undan = Math.min(Math.ceil(S.godis * RESERV_ANDEL), RESERV_TAK - S.reserv, S.godis - 3);
+      if (undan > 0) { S.godis -= undan; S.reserv += undan; }
+    }
+    if (S.godis <= 0 && S.reserv > 0) {
+      const fram = Math.min(S.reserv, LUCKA_EXP * (S.luckor || 1));
+      S.reserv -= fram; S.godis += fram;
+    }
+
+    // Luckorna: expedieringen är kapaciteten som avgör hur FORT kön krymper.
+    const kapacitet = LUCKA_EXP * (S.luckor || 1);
     if (S.godis <= 0) S.kö += 1;
-    else { const ut = Math.min(S.godis, 3); S.godis -= ut; S.kö = Math.max(0, S.kö - ut); }
+    else { const ut = Math.min(S.godis, kapacitet); S.godis -= ut; S.kö = Math.max(0, S.kö - ut); }
 
     // Godis ingen köpte smälts om. Hälften tillbaka — omsmältning kostar.
     if (S.kö === 0 && S.godis > ÅTERVINN_LAGER) {
@@ -607,13 +637,15 @@ const REAKTIONER = {
     logga(`strömavbrottet släckte bandet (${e.från})`, { orsak: e.id });
     begär('produktion', { status: 'stannat', varför: 'strömavbrott', lager: S.godis }, e.id, board);
     // Strömmen antas tillbaka efter en stund — vi vet inte när, så vi startar själva.
+    const nere = S.aggregat ? AGGREGAT_MS : 45_000;
+    if (S.aggregat) logga(`reservaggregatet startar — bandet nere ${nere / 1000} s i stället för 45`);
     setTimeout(() => {
       if (S.band === 'strömlöst') {
         S.band = S.socker >= SATS_SOCKER ? 'kör' : 'sockerstopp';
         logga('strömmen tillbaka, bandet rullar igen');
         spara();
       }
-    }, 45_000).unref?.();
+    }, nere).unref?.();
   },
 
   // @lp elpris-steg: kostnaden slår igenom i priset vid luckan.
@@ -868,6 +900,9 @@ module.exports = {
         tavelnamn: 'Christian',
         socker: S.socker, godis: S.godis, band: S.band, kö: S.kö, pris: S.pris,
         ransonering: S.ransonering, elpris: S.elpris,
+        lucka: { luckor: S.luckor, expedierar: LUCKA_EXP * (S.luckor || 1), max: LUCKA_MAX,
+                 pris: LUCKA_PRIS, reserv: S.reserv, reserv_tak: RESERV_TAK,
+                 aggregat: S.aggregat, aggregat_pris: AGGREGAT_PRIS },
         sats_namn: S.sats_namn, brända: S.brända, gravar: S.gravar, kyrkogård_kg: S.kyrkogård_kg,
         garde: { styrka: S.styrka, materiel_styrka: materielStyrka(), total: S.styrka + materielStyrka(),
                  max: GARDE_MAX, ställning: S.ställning, eskorter: S.eskorter,
@@ -915,6 +950,31 @@ module.exports = {
       const r = lös(kvarter, board, true);
       trösklar(board);
       return svara(res, r, r.ok ? 200 : 409);
+    }
+
+    // Öppna en lucka till. Det är expedieringen, inte produktionen, som avgör hur fort kön
+    // krymper: 3 personer per lucka och tick.
+    if (req.method === 'POST' && (p === '/lucka' || p === '/lucka/')) {
+      framåt();
+      if ((S.luckor || 1) >= LUCKA_MAX) return svara(res, { ok: false, varför: 'fasaden rymmer inte fler luckor', luckor: S.luckor }, 409);
+      if (S.socker < LUCKA_PRIS) return svara(res, { ok: false, varför: 'för lite socker', kräver: LUCKA_PRIS, har: Math.round(S.socker) }, 409);
+      S.socker -= LUCKA_PRIS;
+      S.luckor = (S.luckor || 1) + 1;
+      logga(`öppnade lucka nr ${S.luckor} — expedierar ${LUCKA_EXP * S.luckor} per tick`);
+      trösklar(board);
+      return svara(res, { ok: true, luckor: S.luckor, expedierar: LUCKA_EXP * S.luckor, socker: Math.round(S.socker) });
+    }
+
+    // Reservaggregat: kortar strömavbrottet från 45 till 12 sekunder.
+    if (req.method === 'POST' && (p === '/aggregat' || p === '/aggregat/')) {
+      framåt();
+      if (S.aggregat) return svara(res, { ok: false, varför: 'aggregatet står redan' }, 409);
+      if (S.socker < AGGREGAT_PRIS) return svara(res, { ok: false, varför: 'för lite socker', kräver: AGGREGAT_PRIS, har: Math.round(S.socker) }, 409);
+      S.socker -= AGGREGAT_PRIS;
+      S.aggregat = true;
+      logga(`reservaggregat inköpt — avbrott ${AGGREGAT_MS / 1000} s i stället för 45`);
+      trösklar(board);
+      return svara(res, { ok: true, aggregat: true, avbrott_s: AGGREGAT_MS / 1000, socker: Math.round(S.socker) });
     }
 
     // Anlägg ett sockerbetfält. Betalas i socker — man såddar med det man har.
