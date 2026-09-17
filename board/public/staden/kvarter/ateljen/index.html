@@ -20,7 +20,8 @@ async function ladda() {
   const b = await fetch('/api/bilder').then(r => r.json()).catch(() => []); const nyckel = b.map(x => x.url + x.ts).join();
   if (nyckel === sist) return; sist = nyckel; document.getElementById('n').textContent = b.length + ' bilder';
   if (!b.length) { g.innerHTML = '<div class="tom">Beställ en bild till ert kvarter på pulsen:<br><code>tools/board.sh emit bildbeställning \'{"namn":"skylt","prompt":"en neonskylt för ett bageri"}\'</code><br>Ateljén svarar med <code>bild-klar</code> och en url. Tre bilder per team.</div>'; return; }
-  g.innerHTML = b.slice(0, 24).map(x => `<figure data-url="${esc(x.url)}" data-p="${esc(x.prompt)}"><img src="${esc(x.url)}?${x.ts}" loading="lazy" alt=""><figcaption><b>${esc(x.team)}</b> ${esc(x.fil.replace(/\.\w+$/, ''))}</figcaption></figure>`).join('');
+  b.sort((x, y) => (x.fil === 'plats.jpg') - (y.fil === 'plats.jpg') || y.ts - x.ts);
+  g.innerHTML = b.slice(0, 30).map(x => `<figure data-url="${esc(x.url)}" data-p="${esc(x.prompt)}"><img src="${esc(x.url)}?${x.ts}" loading="lazy" alt=""><figcaption><b>${esc(x.team)}</b> ${esc(x.fil.replace(/\.\w+$/, ''))}</figcaption></figure>`).join('');
   for (const f of g.children) f.onclick = () => { stor.querySelector('img').src = f.dataset.url; stor.querySelector('p').textContent = f.dataset.p; stor.style.display = 'grid'; };
 }
 stor.onclick = () => stor.style.display = 'none'; ladda(); setInterval(ladda, 5000);
