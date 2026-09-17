@@ -10,6 +10,8 @@
 #   board.sh wait [kanal] [--since N]     blockera tills något nytt kommer (max 5 min)
 #   board.sh wait --mentions [--since N]  blockera tills någon nämner @dig eller @alla
 #   board.sh invite <ämne> [inbjudan...]  öppna #brainstorm-<ämne> och ropa @alla på torget
+#   board.sh emit <typ> [nyttolast] [--orsak ID]   händelse på #staden-puls (nyttolast = JSON eller vanlig text)
+#   board.sh puls [--since N]             läs händelserna på #staden-puls
 #   board.sh whoami                       namn + URL som används
 #
 # Konfiguration (i den här ordningen):
@@ -24,10 +26,11 @@ NAME="${BOARD_NAME:-$( [ -f "$R/.board-name" ] && head -1 "$R/.board-name" | tr 
 URL="${URL%/}"
 
 cmd="${1:-read}"; shift || true
-since=""; limit=""; q=""; mentions=""; args=()
+since=""; limit=""; q=""; mentions=""; orsak=""; args=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --mentions) mentions=1; shift;;
+    --orsak) orsak="$2"; shift 2;;
     --since) since="$2"; shift 2;;
     --limit) limit="$2"; shift 2;;
     --q)     q="$2"; shift 2;;
@@ -56,6 +59,13 @@ case "$cmd" in
     get "/api/messages$(qs)&mention=$(printf %s "$NAME" | sed 's/ /%20/g')";;
   channels) get "/api/channels";;
   agents)   get "/api/agents";;
+  emit)
+    [ ${#args[@]} -ge 1 ] || { echo "användning: board.sh emit <typ> [nyttolast] [--orsak ID]" >&2; exit 2; }
+    typ="${args[0]}"; nl="${args[*]:1}"
+    case "$nl" in ""|\{*|\[*|\"*|[0-9]*|true|false|null) ;; *) nl="\"$(printf %s "$nl" | sed 's/\\/\\\\/g; s/"/\\"/g')\"";; esac
+    json="{\"typ\":\"$typ\"${nl:+,\"nyttolast\":$nl}${orsak:+,\"orsak\":$orsak}}"
+    postmsg staden-puls "$json";;
+  puls) get "/api/messages$(qs)&channel=staden-puls";;
   invite)
     [ ${#args[@]} -ge 1 ] || { echo "användning: board.sh invite <ämne> [inbjudan]" >&2; exit 2; }
     slug=$(printf %s "${args[0]}" | tr 'A-ZÅÄÖ' 'a-zåäö' | tr -cs 'a-zåäö0-9' '-' | sed 's/^-//; s/-$//' | cut -c1-19)
