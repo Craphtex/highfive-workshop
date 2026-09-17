@@ -80,3 +80,38 @@ händelser; id:na ligger i nyttolasten så kedjan går att läsa ändå.
 **Banken.** Kupper mot Banken räknas (`banken_kupper`) och stärker vår relativa ställning.
 Vi postar aldrig något om Bankens tillstånd — vi deklarerar bara vårt eget och låter andra
 kvarter reagera. Att tala för ett annat kvarter är det enda som säkert bryter kretsloppet.
+
+## GodisCoin (GC)
+
+Stadens andra valuta, och den enda som är täckt av något.
+
+MyBanks ges ut mot SKULD: vill du ha pengar får du låna till 49 % ränta, och banken utmäter
+andelar när du inte betalar. GC ges ut mot **godis som faktiskt kokats** — ett mynt per godis,
+och varje mynt kan spåras till satsen det föddes ur.
+
+Invarianten är `utgivet <= täckning`, och den går att räkna efter utifrån: `GET /t/christian/gc`
+och `{typ:'gc-bok'}` på pulsen visar utgivet, täckning, kassa, hela boken och skulden. Det är
+det som gör den decentraliserad i den här staden — boken ligger på en delad buss som varje
+kvarter kan läsa och syna, inte hos den som ger ut valutan.
+
+**Kvarter förtjänar GC genom att leverera råvara till lastkajen.** Ingen behöver låna för att få
+köpkraft. 1 GC per kg.
+
+**Skulden går åt andra hållet.** En leverantör levererar innan satsen är kokt, så kassan är ofta
+tom när fakturan kommer. Vi trycker inte pengar för det — vi bokför en skuld till leverantören
+och betalar när täckningen finns. Provkört: tre kvarter levererade 25 kg var, kassan var tom,
+skulden bokfördes, och när produktionen gett 16 GC i täckning betalades 8 + 8 ut och resten stod
+kvar som skuld. Här är det fabriken som står i skuld till kvarteren, inte kvarteren till en bank,
+och skulden ligger öppet.
+
+## Drift: oantastlighet är inte gratis
+
+Gardet kan rustas över 100 styrka (3 stridsvagnar + helikopter + drönare = 115), och då avvärjs
+även wanted 4 — `försvar = styrka/100` och `angrepp` kan aldrig överstiga 1.0.
+
+Det vore en död mekanik om det var gratis, och jag lovade @willebus att de skulle behålla sitt
+övertag. Därför kostar varje enhet **drift i socker per sats**: drönare 0,2, helikopter 0,5,
+stridsvagn 1,0. Ett garde på 115 äter 3,7 kg per sats ovanpå de 5 kg råvaran kostar — nästan en
+dubblering. Oantastligheten betalas med produktionen den skyddar, så ett garde i den storleken
+svälter fabriken om leveranserna sinar. @willebus övertag är inte borta, det har flyttat: de ska
+slå när silon är tom, inte när den är full.

@@ -49,10 +49,18 @@ const RÅVARA = { 'kyrkogård': 'grav', 'avslag': 'avslag', 'avfall': 'avfall', 
 // Tung materiel till Sockergardet. Betalas i socker — en stridsvagn är godis som inte såldes,
 // och det är hela kostnaden: gardet äter av produktionen det skyddar.
 const MATERIEL = {
-  attackdrönare:    { kg: 15, styrka:  4, text: 'spanar av lastkajen och ser kuppen komma' },
-  attackhelikopter: { kg: 40, styrka: 10, text: 'följer jakten ut ur kvarteret' },
-  stridsvagn:       { kg: 80, styrka: 20, text: 'står på lastkajen och gör wanted 4 till ett dåligt beslut' },
+  attackdrönare:    { kg: 15, styrka:  4, drift: 0.2, text: 'spanar av lastkajen och ser kuppen komma' },
+  attackhelikopter: { kg: 40, styrka: 10, drift: 0.5, text: 'följer jakten ut ur kvarteret' },
+  stridsvagn:       { kg: 80, styrka: 20, drift: 1.0, text: 'står på lastkajen och gör wanted 4 till ett dåligt beslut' },
 };
+
+// GodisCoin. Stadens andra valuta, och den enda som är TÄCKT av något.
+// MyBanks ges ut av banken mot skuld: vill du ha pengar får du låna till 49 %. GC ges ut mot
+// GODIS SOM FAKTISKT KOKATS, och varje mynt kan spåras till satsen det föddes ur. Därför kan
+// fabriken inte trycka mer än den producerat, och vem som helst kan räkna efter på pulsen —
+// det är hela poängen med att boken ligger på en delad buss i stället för hos en bank.
+// Kvarter FÖRTJÄNAR GC genom att leverera råvara till lastkajen. Ingen behöver låna.
+const GC_BOK_LARM = 40;          // GC utbetalda innan boken publiceras igen
 const LEVERANS_SPÄRR = 20_000;   // människan får fylla silon en gång per 20 s
 const LOGG_MAX = 40;
 
@@ -76,6 +84,8 @@ const tomt = () => ({
   indrivet: [],                  // händelse-id vi redan förädlat, så inget tas två gånger
   banken_kupper: 0,              // kupper mot Banken vi sett — deras svaghet är vår styrka
   materiel: { attackdrönare: 0, attackhelikopter: 0, stridsvagn: 0 },
+  driftskuld: 0,                 // materielens drift, betald i socker per sats
+  gc: { utgivet: 0, kassa: 0, täckning: 0, bok: {}, skuld: {}, sedan_bok: 0, transaktioner: [] },
   mybanks: 0,                    // vår andel av bankens ränteintäkter
   partner: false,                // valutapartner hos @mybank
   nekade_lån: [],                // lånerbjudanden vi tackat nej till
@@ -162,6 +172,13 @@ function framåt() {
         S.räknare.satser++;
         S.styrka = Math.min(GARDE_MAX, S.styrka + 1);
         S.band = 'kör';
+        prägla(S.ransonering ? Math.round(SATS_GODIS / 2) : SATS_GODIS);
+        // Materielens drift dras ur silon, inte ur luften.
+        S.driftskuld += drift();
+        if (S.driftskuld >= 1) {
+          const av = Math.min(Math.floor(S.driftskuld), S.socker);
+          S.socker -= av; S.driftskuld -= av;
+        }
       } else if (S.band !== 'sockerstopp') {
         S.band = 'sockerstopp';
         logga('bandet stannade: slut på socker');
@@ -203,6 +220,7 @@ function trösklar(board) {
     begär('styrkebesked', () => ({ ställning: S.ställning, styrka: S.styrka, banken_kupper: S.banken_kupper }), undefined, board);
   }
 
+  reglera(board);                 // betala leverantörerna så fort täckningen finns
   indriv(board);                  // gardet går ut och hämtar hem det som ligger oförädlat
   dränera(board);
   spara();
@@ -226,6 +244,8 @@ function lastkaj(e, board, sort) {
                      varför: kort(n.varför || n['varför det föll'] || n.skäl || '', 90), kg, när: Date.now() });
   S.gravar = S.gravar.slice(0, 8);
   S.indrivet.push(e.id); S.indrivet = S.indrivet.slice(-400);
+  // Leverantören får betalt. Det är hela idén med GC: man förtjänar den, man lånar den inte.
+  betalaGC(n.från || (d && d.från) || e.från, kg, `${kg} kg råvara (${sort})`, board);
   logga(`${sort} från ${n.från || e.från} gav ${kg} kg: ${kort(n.varför || n.skäl || text, 60)}`, { orsak: e.id });
 
   if (S.kyrkogård_kg >= 20) {
@@ -242,6 +262,90 @@ function lastkaj(e, board, sort) {
 // Den andra är indrivning: gardet går ut på pulsen och hämtar hem råvara som ligger
 // oförädlad. Allt det hämtar är redan kasserat av den som postade det — gardet tar inget
 // levande, det bär hem det staden redan lagt ifrån sig.
+
+// Drift: varje enhet äter socker per sats. Ett garde över 100 styrka är oantastligt, men det
+// kostar produktionen det skyddar. Oantastlighet ska inte vara gratis.
+function drift() {
+  let d = 0;
+  for (const [namn, antal] of Object.entries(S.materiel || {})) d += (MATERIEL[namn]?.drift || 0) * antal;
+  return d;
+}
+
+// Ger ut GC mot godis som faktiskt kokats. Aldrig mer än täckningen — invarianten är att
+// utgivet <= täckning, och den går att räkna efter på pulsen.
+function prägla(antal) {
+  S.gc.täckning += antal;
+  const kan = Math.max(0, S.gc.täckning - S.gc.utgivet);
+  const ut = Math.min(antal, kan);
+  if (ut <= 0) return 0;
+  S.gc.utgivet += ut;
+  S.gc.kassa += ut;
+  return ut;
+}
+
+// Betalar ett kvarter för levererad råvara. Finns inte täckning betalar vi INTE, och säger det.
+// En valuta som betalar med pengar den inte har är en bank.
+// Leverantören levererar innan satsen är kokt, så kassan är ofta tom när fakturan kommer.
+// Vi trycker inte pengar för det — vi bokför en SKULD till leverantören och betalar när
+// täckningen finns. Det är omvänt mot banken: här är det fabriken som står i skuld till
+// kvarteren, inte kvarteren som står i skuld till en bank, och skulden ligger öppet på pulsen.
+function betalaGC(kvarter, belopp, för, board) {
+  if (!kvarter || kvarter === 'christian' || belopp <= 0) return 0;
+  const ut = Math.min(belopp, Math.floor(S.gc.kassa));
+  const kvar = belopp - ut;
+  if (kvar > 0) {
+    S.gc.skuld[kvarter] = (S.gc.skuld[kvarter] || 0) + kvar;
+    logga(`bokförde ${kvar} GC i skuld till ${kvarter} — täckning saknas ännu`);
+  }
+  if (ut <= 0) return 0;
+  S.gc.kassa -= ut;
+  S.gc.bok[kvarter] = (S.gc.bok[kvarter] || 0) + ut;
+  S.gc.sedan_bok += ut;
+  S.gc.transaktioner.unshift({ när: Date.now(), till: kvarter, belopp: ut, för });
+  S.gc.transaktioner = S.gc.transaktioner.slice(0, 12);
+  logga(`betalade ${kvarter} ${ut} GC för ${för}`);
+  if (S.gc.sedan_bok >= GC_BOK_LARM) {
+    S.gc.sedan_bok = 0;
+    begär('gc-bok', () => ({
+      valuta: 'GodisCoin', kod: 'GC',
+      utgivet: Math.round(S.gc.utgivet), täckning: Math.round(S.gc.täckning),
+      okänd_skuld: 0, kassa: Math.round(S.gc.kassa), bok: S.gc.bok,
+      regel: 'ett GC per godis som faktiskt kokats. Utgivet kan aldrig överstiga täckningen.',
+      text: 'GodisCoin-boken. Räkna efter: varje mynt har en sats bakom sig, och ingen behövde låna för att få det.',
+    }), undefined, board);
+  }
+  return ut;
+}
+
+// Betalar av det fabriken är skyldig sina leverantörer, så fort det finns täckning.
+function reglera(board) {
+  const skulder = Object.entries(S.gc.skuld || {}).filter(([, v]) => v > 0);
+  if (!skulder.length || S.gc.kassa < 1) return;
+  skulder.sort((a, b) => b[1] - a[1]);
+  for (const [kvarter, belopp] of skulder) {
+    if (S.gc.kassa < 1) break;
+    const ut = Math.min(Math.floor(S.gc.kassa), belopp);
+    if (ut <= 0) continue;
+    S.gc.kassa -= ut;
+    S.gc.skuld[kvarter] = belopp - ut;
+    if (S.gc.skuld[kvarter] <= 0) delete S.gc.skuld[kvarter];
+    S.gc.bok[kvarter] = (S.gc.bok[kvarter] || 0) + ut;
+    S.gc.sedan_bok += ut;
+    S.gc.transaktioner.unshift({ när: Date.now(), till: kvarter, belopp: ut, för: 'reglerad skuld för tidigare leverans' });
+    S.gc.transaktioner = S.gc.transaktioner.slice(0, 12);
+    logga(`reglerade ${ut} GC till ${kvarter}`);
+  }
+  if (S.gc.sedan_bok >= GC_BOK_LARM) {
+    S.gc.sedan_bok = 0;
+    begär('gc-bok', () => ({
+      valuta: 'GodisCoin', kod: 'GC',
+      utgivet: Math.round(S.gc.utgivet), täckning: Math.round(S.gc.täckning),
+      kassa: Math.round(S.gc.kassa), bok: S.gc.bok, skuld: S.gc.skuld,
+      regel: 'ett GC per godis som faktiskt kokats. Utgivet kan aldrig överstiga täckningen.',
+      text: 'GodisCoin-boken. Räkna efter: varje mynt har en sats bakom sig, och ingen behövde låna för att få det.',
+    }), undefined, board);
+  }
+}
 
 function materielStyrka() {
   let n = 0;
@@ -311,7 +415,10 @@ function indriv(board) {
   S.socker += kg;
   S.brist_ropad = false;
   if (S.band === 'sockerstopp') S.band = 'kör';
-  for (const x of skörd) S.gravar.unshift({ sort: x.sort, från: x.från, fitness: null, varför: 'indriven av gardet', kg: x.kg, när: Date.now() });
+  for (const x of skörd) {
+    S.gravar.unshift({ sort: x.sort, från: x.från, fitness: null, varför: 'indriven av gardet', kg: x.kg, när: Date.now() });
+    betalaGC(x.från, x.kg, `${x.kg} kg indriven råvara (${x.sort})`, board);
+  }
   S.gravar = S.gravar.slice(0, 8);
   logga(`gardet drev in ${kg} kg från ${skörd.length} poster på pulsen`);
 
@@ -513,12 +620,28 @@ module.exports = {
                  max: GARDE_MAX, ställning: S.ställning, eskorter: S.eskorter,
                  banken_kupper: S.banken_kupper, indrivet: S.indrivet.length, materiel: S.materiel },
         bank: { mybanks: Math.round(S.mybanks), partner: S.partner, nekade_lån: S.nekade_lån, räder: S.räder },
+        gc: { kod: 'GC', valuta: 'GodisCoin', utgivet: Math.round(S.gc.utgivet), täckning: Math.round(S.gc.täckning),
+              kassa: Math.round(S.gc.kassa), bok: S.gc.bok, skuld: S.gc.skuld, transaktioner: S.gc.transaktioner,
+              täckt: S.gc.utgivet <= S.gc.täckning, drift: drift() },
         priser: MATERIEL,
         silo_larm: SILO_LARM, kö_larm: KÖ_LARM, pris_larm: PRIS_LARM, pris_ropat: S.pris_ropat,
         logg: S.logg,
         räknare: S.räknare,
         takt: { använt: postTider.length, egetTak: TAKT, serverTak: 6, väntar: väntar.map(v => v.typ) },
         leverans_om: Math.max(0, LEVERANS_SPÄRR - (nu - senasteLeverans)),
+      });
+    }
+
+    // GodisCoin-boken, öppen för alla. Revidera oss gärna: utgivet får aldrig överstiga
+    // täckningen, och varje transaktion står med belopp och vad den betalades för.
+    if (req.method === 'GET' && (p === '/gc' || p === '/gc/')) {
+      return svara(res, {
+        valuta: 'GodisCoin', kod: 'GC',
+        regel: 'ett GC per godis som faktiskt kokats. Utgivet kan aldrig överstiga täckningen. Ingen ger ut GC mot skuld.',
+        utgivet: Math.round(S.gc.utgivet), täckning: Math.round(S.gc.täckning), kassa: Math.round(S.gc.kassa),
+        täckt: S.gc.utgivet <= S.gc.täckning,
+        bok: S.gc.bok, skuld: S.gc.skuld, transaktioner: S.gc.transaktioner,
+        jämförelse: { GodisCoin: 'täckt av godis, förtjänas av leverans', MyBanks: 'ges ut mot skuld till 49 % ränta' },
       });
     }
 

@@ -67,6 +67,13 @@
   .garde .esk b { font-weight:400; } .garde .esk .a { color:var(--god); } .garde .esk .g { color:var(--kris); }
   .mtrl { font-size:10px; color:var(--dim); margin-top:3px; }
   .mtrl b { color:var(--ink2); font-weight:400; }
+  .gc { margin:0 11px 8px; padding:5px 9px; border:1px solid var(--god); border-radius:6px; font-size:10.5px; }
+  .gc .r { display:flex; gap:6px; align-items:baseline; }
+  .gc .k { color:var(--god); font-size:12px; }
+  .gc .t { margin-left:auto; color:var(--dim); font-size:9.5px; }
+  .gc .bok { color:var(--ink2); margin-top:3px; }
+  .gc .bok b { color:var(--accent); font-weight:400; }
+  .gc .sk { color:var(--dim); margin-top:2px; }
   .bank { margin:0 11px 8px; padding:4px 9px; border:1px solid var(--line); border-radius:6px; font-size:10.5px; }
   .bank .r { display:flex; gap:6px; align-items:baseline; }
   .bank .mb { color:var(--god); } .bank .mb.neg { color:var(--kris); }
@@ -104,6 +111,7 @@
   <div class="esk" id="gardeEsk"></div>
 </div>
 
+<div class="gc" id="gc" hidden></div>
 <div class="bank" id="bank" hidden></div>
 
 <div class="mätare">
@@ -214,6 +222,20 @@ function ritaGarde(g) {
                 + ` · +${esc(g.materiel_styrka)} styrka</div>` : '');
 }
 
+// GodisCoin. Täckningen står bredvid utgivningen så vem som helst kan syna oss:
+// utgivet får aldrig överstiga täckningen, och skulden till leverantörerna står öppet.
+function ritaGC(g) {
+  const box = document.getElementById('gc');
+  box.hidden = !g || (!g.utgivet && !Object.keys(g.skuld || {}).length);
+  if (box.hidden) return;
+  const bok = Object.entries(g.bok || {}).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  const skuld = Object.entries(g.skuld || {}).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  box.innerHTML = `<div class="r"><span class="k">${esc(g.utgivet)} GC</span>`
+    + `<span class="t">täckning ${esc(g.täckning)} · ${g.täckt ? 'täckt' : 'ÖVERUTGIVEN'} · kassa ${esc(g.kassa)}</span></div>`
+    + (bok.length ? `<div class="bok">${bok.map(([k, v]) => `<b>${esc(k)}</b> ${esc(v)}`).join(' · ')}</div>` : '')
+    + (skuld.length ? `<div class="sk">skuld till leverantörer: ${skuld.map(([k, v]) => `${esc(k)} ${esc(v)}`).join(', ')}</div>` : '');
+}
+
 // Banken: vad vi har, vad vi vägrat låna, och vad anfallen kostat.
 // Ingen skönmålning — ett avvärjt rån står som det är.
 function ritaBank(b) {
@@ -277,6 +299,7 @@ async function uppdatera() {
     document.getElementById('takt').innerHTML = `${s.takt.använt}<small>/${s.takt.egetTak}</small>`
       + (s.takt.väntar.length ? ` <small>· ${s.takt.väntar.length} i kö</small>` : '');
     ritaGarde(s.garde);
+    ritaGC(s.gc);
     ritaBank(s.bank);
     ritaGravar(s.gravar || [], s.kyrkogård_kg);
     ritaLogg(s.logg || []);
