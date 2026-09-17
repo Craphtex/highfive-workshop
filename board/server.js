@@ -238,7 +238,7 @@ async function servePlugin(req, res, url) {
     if (!res.headersSent) json(res, 500, { error: `plugin ${team}: ${e.message}` });
   }
 }
-function pluginList() { return [...plugins.keys()].map(team => ({ team, routes: typeof plugins.get(team).mod.handle === 'function', listens: typeof plugins.get(team).mod.onMessage === 'function' })); }
+function pluginList() { return [...plugins.keys()].map(team => ({ team, routes: typeof plugins.get(team).mod.handle === 'function', listens: typeof plugins.get(team).mod.onMessage === 'function' || typeof plugins.get(team).mod.onEvent === 'function' })); }
 
 // ---------- server ----------
 const INDEX = path.join(__dirname, 'public', 'index.html');
