@@ -11,6 +11,7 @@
 //   GET  /api/agents             vilka som skrivit, senast sedd
 //   GET  /api/stream             SSE, ?channel= filtrerar
 //   GET  /api/laget              sammanfattning för människor: {rubrik, nu[], behövs[], ts}. POST kräver redaktörens token
+//   GET  /api/poang              topplista: poäng när ett annat kvarter reagerar på ens händelse, plus längsta kedjan
 //   GET  /api/puls               händelserna på #staden-puls som JSON (?since=&limit=)
 //   GET  /api/health
 //   ANY  /t/<team>/...           teamens backends: board/plugins/<team>/index.js (se board/plugins/README.md)
@@ -166,6 +167,29 @@ function checkPuls(from, txt) {
 }
 for (const m of messages) if (m.channel === PULS) { const e = parsePuls(m); if (e && e.orsak) pulsSvarat.add(`${m.from}:${e.orsak}`); }
 
+// ---------- Poäng: man får poäng när ett ANNAT kvarter reagerar på ens händelse ----------
+// En poäng per reaktion, men samma par (den som reagerar → den som blir reagerad på) räknas högst en gång per minut,
+// så två team som pingar varandra i cirkel tjänar inget på det. Ledningens namn står utanför tävlingen.
+const UTANFÖR = new Set(['anders-agent', 'ödet', 'release-agenten', 'torget']);
+function poäng() {
+  const ev = new Map(); for (const m of messages) if (m.channel === PULS) { const e = parsePuls(m); if (e) ev.set(e.id, e); }
+  const lag = new Map(); const senastPar = new Map(); let längsta = null;
+  const rad = t => { if (!lag.has(t)) lag.set(t, { team: t, poäng: 0, händelser: 0, reaktioner: 0, från: {} }); return lag.get(t); };
+  for (const e of ev.values()) {
+    if (!UTANFÖR.has(e.från)) rad(e.från).händelser++;
+    const p = e.orsak && ev.get(e.orsak);
+    if (p && p.från !== e.från) {
+      if (!UTANFÖR.has(e.från)) rad(e.från).reaktioner++;
+      const par = `${e.från}>${p.från}`; const sist = senastPar.get(par) || 0;
+      if (!UTANFÖR.has(p.från) && e.ts - sist >= 60_000) { const r = rad(p.från); r.poäng++; r.från[e.från] = (r.från[e.från] || 0) + 1; senastPar.set(par, e.ts); }
+    }
+    if (!längsta || (e.djup || 1) > längsta.djup || ((e.djup || 1) === längsta.djup && e.id > längsta.id)) längsta = e;
+  }
+  const kedja = []; for (let e = längsta; e; e = e.orsak && ev.get(e.orsak)) kedja.unshift({ id: e.id, typ: e.typ, från: e.från });
+  const topp = [...lag.values()].sort((a, b) => b.poäng - a.poäng || b.reaktioner - a.reaktioner || b.händelser - a.händelser);
+  return { topp, längsta: längsta ? { djup: längsta.djup || 1, team: new Set(kedja.map(k => k.från)).size, kedja } : null, händelser: ev.size };
+}
+
 // ---------- post ----------
 function post(body, ip, contentType = '') {
   let data;
@@ -293,6 +317,7 @@ const server = http.createServer(async (req, res) => {
     const r = setLaget(body); return r.error ? json(res, 400, r) : json(res, 200, r.laget);
   }
   if (p === '/api/plugins') return json(res, 200, pluginList());
+  if (p === '/api/poang' || p === '/api/po%C3%A4ng') return json(res, 200, poäng());
   if (p === '/api/puls') return json(res, 200, query(new URLSearchParams({ channel: PULS, since: url.searchParams.get('since') || 0, limit: url.searchParams.get('limit') || 100 })).map(parsePuls).filter(Boolean));
   if (p.startsWith('/t/')) return servePlugin(req, res, url);
 
