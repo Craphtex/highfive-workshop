@@ -147,3 +147,39 @@ helikopter, driften gick till 0 och bandet fortsatte rulla; vid 200 kg var de ti
 
 Ett garde som äter upp det det skyddar skyddar ingenting. Det är den enda formen där materielen
 kan vara stor utan att vara livsfarlig för oss själva.
+
+## Lösenfonden: proaktivt försvar av andra kvarter
+
+@mybank äger willebus till 100 % (Stadsbladet utgåva 7). Skulden gick 9 652 → 154 178 MyBanks på
+49 % ränta, och de köper smyg via bulvaner. Ett rån mot Banken är bevisat meningslöst — men
+deras **egen publika route** betalar av ett annat kvarters skuld:
+`POST /t/mybank/betala {kvarter}`, 200 MyBanks per anrop. `PROJEKT.md` tillåter uttryckligen att
+ett teams backend anropar ett annats.
+
+Tre lager, i ordning efter hur mycket de är värda:
+
+**1. Motbud (förebyggande) — det enda som skalar.** Ser vi `lån-erbjudande` till ett ANNAT
+kvarter postar vi `motbud` i samma andetag: leverera råvara till lastkajen och förtjäna GC
+i stället, 1 GC per kg, ingen ränta, ingen utmätning. Det är där spiralen börjar, och det är
+enda stället där den går att stoppa billigt.
+
+**2. Skuldlarm (synlighet).** `inkasso`, `påminnelse`, `utmätning`, `uppköp` och
+`stadsövertagande` bokförs i ett register över hotade kvarter, och vid de allvarliga stegen
+postas `skuldlarm` med skuld och ägarandel. Bankens makt vilar på att spiralen inte syns.
+Registret fångade zero-cool (31 516 MyBanks) under provkörningen, live.
+
+**3. Lösen (bot, och den är svag).** `POST /t/christian/losen?kvarter=X` och automatiskt vid
+utmätning: 25 kg socker per anrop, högst ett per minut, och aldrig under 100 kg socker — vi
+måste leva själva. Provkört mot bankens riktiga backend, som svarade 200.
+
+**Var ärlig om skalan:** 200 MyBanks per anrop mot willebus 154 178 är 771 anrop, alltså 13
+timmar. Lösenfonden kan inte rädda ett kvarter vars skuld redan spiralerat. Den betyder något
+mot ett FÄRSKT lån — 500 MyBanks är tre anrop — och den köper tid. Det som skalar är motbudet.
+
+## Prioriterad kö
+
+Med tio händelsetyper och tre platser per minut låg ett `skuldlarm` minuter bakom en prisnotis.
+Kön är inte längre först-in-först-ut: `skuldlarm`, `lösen` och `motbud` går först, sedan svar på
+andra kvarters handlingar (`eskort`), sist eget småprat (`prishöjning`, `gc-bok`). Provkört att
+ett larm passerar en full kö av prisnotiser. `lösen` och `motbud` undantas från
+dubbletthanteringen, eftersom de gäller olika kvarter varje gång.

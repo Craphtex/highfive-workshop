@@ -15,6 +15,7 @@
 //   GET  /t/christian/status     hela fabrikens läge + loggen med orsakskedjan
 //   POST /t/christian/leverans   en människa vid storskärmen fyller silon (spärr: en gång per 20 s)
 //   POST /t/christian/odla       anlägg ett sockerbetfält (30 kg utsäde) — egen försörjning
+//   POST /t/christian/losen?kvarter=X   betala av X:s skuld hos MyBank, 25 kg socker
 //   POST /t/christian/rusta?enhet=stridsvagn   köp materiel till gardet, betalas i socker
 //   POST /t/christian/anfall     räd mot Banken. Förlustaffär: lasernätet avvärjer alltid och
 //                                fakturerar oss. Ligger här för att den efterfrågats, aldrig automatisk.
@@ -71,6 +72,29 @@ const ODLING_MAX = 8;            // fler fält än så får inte plats vid Torge
 const ÅTERVINNING = 0.5;         // andel socker tillbaka ur godis ingen köpte
 const ÅTERVINN_LAGER = 30;       // godis över detta, och tom kö, går till omsmältning
 const DRIFT_NÖDLÄGE = 10;        // under så mycket socker mothballas materielen
+
+// LÖSENFONDEN. @mybank äger willebus till 100 % (utgåva 7 i Stadsbladet). Skulden gick från
+// 9 652 till 154 178 MyBanks på 49 % ränta, och banken köper dessutom smyg via bulvaner.
+// Ett rån mot Banken är bevisat meningslöst. Men deras EGEN publika route betalar av ett
+// annat kvarters skuld: POST /t/mybank/betala {kvarter}, 200 MyBanks per anrop. PROJEKT.md
+// tillåter uttryckligen att ett teams backend anropar ett annats.
+// Det är hela idén: överskottet vi blev självförsörjande för köper andra kvarter fria.
+const LÖSEN_KG = 25;             // socker fabriken lägger ut per lösenanrop
+const LÖSEN_GOLV = 100;          // under så mycket socker löser vi ingen (vi måste leva själva)
+const LÖSEN_PAUS = 60_000;       // högst ett anrop per minut, vi hamrar inte på deras backend
+const HOT = new Set(['inkasso', 'påminnelse', 'utmätning', 'uppköp', 'stadsövertagande', 'lån-beviljat']);
+
+// Kön är inte först-in-först-ut. Med tio händelsetyper och tre platser per minut skulle ett
+// skuldlarm kunna ligga i minuter bakom en prisnotis, och ett larm som kommer sent är värdelöst.
+// Låg siffra går först.
+const PRIO = {
+  'skuldlarm': 0, 'lösen': 0, 'motbud': 0,        // någon annan är på väg att förlora sitt kvarter
+  'eskort': 1, 'lagret-plundrat': 1,              // svar på ett annat kvarters handling
+  'socker-slut': 2, 'ransonering': 2, 'produktion': 2,
+  'godis-klart': 3, 'kö-vid-luckan': 3, 'prishöjning': 4, 'gc-bok': 4, 'styrkebesked': 4,
+  'socker-levererat': 4, 'rån': 1, 'indrivning': 3,
+};
+const prio = typ => (PRIO[typ] === undefined ? 3 : PRIO[typ]);
 const LEVERANS_SPÄRR = 20_000;   // människan får fylla silon en gång per 20 s
 const LOGG_MAX = 40;
 
@@ -98,6 +122,9 @@ const tomt = () => ({
   odling: 1,                     // sockerbetfält vid Torget — vår enda oberoende källa
   förråd: {},                    // materiel i mothball: kostar ingen drift, ger ingen styrka
   skördat: 0, återvunnet: 0, bärgat: 0,
+  hotade: {},                    // kvarter -> {skuld, ägd, sort, när} ur bankens egna händelser
+  lösen: [],                     // {när, kvarter, svar, kg}
+  löst_kg: 0,
   gc: { utgivet: 0, kassa: 0, täckning: 0, bok: {}, skuld: {}, sedan_bok: 0, transaktioner: [] },
   mybanks: 0,                    // vår andel av bankens ränteintäkter
   partner: false,                // valutapartner hos @mybank
@@ -137,9 +164,11 @@ function logga(text, extra = {}) {
 // ---------- takt: köa hellre än att tappa ----------
 
 function begär(typ, nyttolast, orsak, board) {
-  // Samma typ två gånger i kön är brus — den färskare vinner.
-  väntar = väntar.filter(v => v.typ !== typ);
-  väntar.push({ typ, nyttolast, orsak, begärd: Date.now() });
+  // Samma typ två gånger i kön är brus — den färskare vinner. Undantag: lösen och motbud
+  // gäller olika kvarter varje gång och får inte skriva över varandra.
+  if (typ !== 'lösen' && typ !== 'motbud') väntar = väntar.filter(v => v.typ !== typ);
+  väntar.push({ typ, nyttolast, orsak, begärd: Date.now(), prio: prio(typ) });
+  väntar.sort((a, b) => a.prio - b.prio || a.begärd - b.begärd);
   S.räknare.köade++;
   dränera(board);
 }
@@ -374,6 +403,47 @@ function reglera(board) {
   }
 }
 
+// Anropar bankens egen publika route. Inget kryphål: den är dokumenterad i deras rad 10 och
+// PROJEKT.md tillåter att ett teams backend anropar ett annats. Vi hamrar inte — en per minut.
+let senasteLösen = 0;
+function ringBanken(kvarter, klar) {
+  const body = JSON.stringify({ kvarter });
+  try {
+    const r = require('http').request({
+      host: '127.0.0.1', port: Number(process.env.PORT) || 8180,
+      path: '/t/mybank/betala', method: 'POST',
+      headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) },
+    }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => klar(null, res.statusCode, d)); });
+    r.setTimeout(4000, () => { r.destroy(); klar(new Error('timeout')); });
+    r.on('error', e => klar(e));
+    r.end(body);
+  } catch (e) { klar(e); }
+}
+
+// Löser ut ett kvarter ur bankens skuld. Betalas med vårt socker, så det är en riktig uppoffring
+// och inte en gest: LÖSEN_KG per anrop, och aldrig under golvet där vi själva börjar svälta.
+function lös(kvarter, board, manuell = false) {
+  if (!kvarter || kvarter === 'christian') return { ok: false, varför: 'inget kvarter' };
+  const nu = Date.now();
+  if (!manuell && nu - senasteLösen < LÖSEN_PAUS) return { ok: false, varför: 'paus' };
+  if (S.socker < LÖSEN_GOLV + LÖSEN_KG) return { ok: false, varför: 'under lösengolvet', golv: LÖSEN_GOLV, har: Math.round(S.socker) };
+  senasteLösen = nu;
+  S.socker -= LÖSEN_KG;
+  S.löst_kg += LÖSEN_KG;
+  const post = { när: nu, kvarter, kg: LÖSEN_KG, svar: 'skickat' };
+  S.lösen.unshift(post); S.lösen = S.lösen.slice(0, 8);
+  logga(`lösen: betalar av ${kvarter}s skuld hos banken för ${LÖSEN_KG} kg socker`);
+  ringBanken(kvarter, (fel, kod, svar) => {
+    post.svar = fel ? `fel: ${fel.message}` : `${kod}`;
+    if (!fel && kod >= 200 && kod < 300) {
+      begär('lösen', () => ({ kvarter, betalade_av: 'Godisfabriken', kostnad_kg: LÖSEN_KG,
+        text: `Godisfabriken har betalat av en del av ${kvarter}s skuld hos MyBank. Det kostade oss ${LÖSEN_KG} kg socker och ingen ränta.` }), undefined, board);
+    }
+    spara();
+  });
+  return { ok: true, kvarter, kg: LÖSEN_KG, socker: Math.round(S.socker) };
+}
+
 function materielStyrka() {
   let n = 0;
   for (const [namn, antal] of Object.entries(S.materiel || {})) n += (MATERIEL[namn]?.styrka || 0) * antal;
@@ -577,13 +647,33 @@ const REAKTIONER = {
   // MyBanks till 49 % ränta (deras rad 196). Så driver de in och utmäter andelar tills de äger
   // staden. Vi tackar nej varje gång och visar det i rutan. Det är den enda försvarslinje som
   // fungerar mot en bank: att inte vara skyldig den något.
-  'lån-erbjudande': (e) => {
+  'lån-erbjudande': (e, board) => {
     const n = e.nyttolast || {};
-    if (n.kvarter && n.kvarter !== 'christian') return;
-    S.nekade_lån.unshift({ när: Date.now(), belopp: n.belopp, ränta: n.ränta });
-    S.nekade_lån = S.nekade_lån.slice(0, 6);
-    logga(`nekade lån: ${n.belopp} MyBanks till ${n.ränta} % ränta`, { orsak: e.id });
+    if (!n.kvarter || n.kvarter === 'christian') {
+      S.nekade_lån.unshift({ när: Date.now(), belopp: n.belopp, ränta: n.ränta });
+      S.nekade_lån = S.nekade_lån.slice(0, 6);
+      logga(`nekade lån: ${n.belopp} MyBanks till ${n.ränta} % ränta`, { orsak: e.id });
+      return;
+    }
+    // Erbjudandet gäller ett ANNAT kvarter. Här börjar spiralen som tog willebus, så vi
+    // lägger ett motbud i samma andetag: leverera råvara till lastkajen och få GC i stället.
+    // Ingen ränta, ingen utmätning, ingen bulvan. Det är billigare för oss att förebygga.
+    logga(`banken erbjuder ${n.kvarter} lån på ${n.belopp} till ${n.ränta} % — lägger motbud`, { orsak: e.id });
+    begär('motbud', () => ({ till: n.kvarter, i_stället_för: { belopp: n.belopp, ränta: n.ränta, från: 'MyBank' },
+      erbjudande: 'råvara till lastkajen ger 1 GC per kg, ingen ränta, ingen utmätning',
+      kurs: '1 GC per kg avfall, avslag, upplöst, kyrkogård eller angrepp som inte bet',
+      täckning: `${Math.round(S.gc.täckning)} godis bakom ${Math.round(S.gc.utgivet)} GC`,
+      text: `${n.kvarter}: ta inte lånet. 49 % ränta är hur banken tog willebus. Leverera råvara till Godisfabriken i stället och förtjäna GC — vi är skyldiga er, inte omvänt.` }), e.id, board);
   },
+
+  // Bankens hot mot vilket kvarter som helst. Vi bokför dem och larmar, för bankens makt
+  // vilar på att spiralen inte syns. Ett offentligt register över vem som är näst i tur är
+  // ett försvar för alla, och det kostar ingenting att föra.
+  'inkasso': (e, board) => hot(e, board),
+  'påminnelse': (e, board) => hot(e, board),
+  'utmätning': (e, board) => hot(e, board),
+  'uppköp': (e, board) => hot(e, board),
+  'stadsövertagande': (e, board) => hot(e, board),
 
   // Vår andel av bankens ränteintäkter, 2 % per takt så länge vi räknar i MyBanks.
   'partnerutdelning': (e) => {
@@ -619,6 +709,36 @@ const REAKTIONER = {
   'svar': (e, board) => beslut(e, board),
   'godkänt': (e, board) => beslut(e, board),
 };
+
+// Bokför bankens hot, larmar när det trappas upp, och löser ut om vi har överskott.
+function hot(e, board) {
+  const n = e.nyttolast || {};
+  const kvarter = n.kvarter;
+  if (!kvarter) return;
+  const förr = S.hotade[kvarter] || {};
+  S.hotade[kvarter] = {
+    sort: e.typ,
+    skuld: Number(n.skuld) || förr.skuld || null,
+    ägd: Number(n.ägd) || Number(n.andel) || förr.ägd || null,
+    när: Date.now(),
+  };
+  const h = S.hotade[kvarter];
+  logga(`banken: ${e.typ} mot ${kvarter}${h.skuld ? ` (${h.skuld} MyBanks)` : ''}${h.ägd ? `, ägd ${h.ägd} %` : ''}`, { orsak: e.id });
+
+  // Larma bara vid de allvarliga stegen, inte vid varje påminnelse — annars blir vi bruset.
+  if (e.typ === 'utmätning' || e.typ === 'uppköp' || e.typ === 'stadsövertagande') {
+    begär('skuldlarm', () => ({
+      kvarter, sort: e.typ, skuld: h.skuld, ägd: h.ägd,
+      hotade: Object.keys(S.hotade),
+      lösen_kostar: `${LÖSEN_KG} kg socker per 200 MyBanks`,
+      text: `SKULDLARM: ${kvarter} är ${h.ägd ? `ägd till ${h.ägd} %` : 'under utmätning'} av MyBank`
+          + `${h.skuld ? ` med ${h.skuld} MyBanks i skuld` : ''}. Godisfabrikens lösenfond betalar av `
+          + `skuld för den som ber om det. Ingen ränta, inget ägande, ingen bulvan.`,
+    }), e.id, board);
+  }
+
+  if (kvarter !== 'christian' && S.socker >= LÖSEN_GOLV + LÖSEN_KG) lös(kvarter, board);
+}
 
 // Letar efter ett beslut om ransonering i stadens svar. Vi gissar inte på ja: står det inget
 // om ransonering rör vi ingenting, och vi säger i loggen att vi lät det passera.
@@ -678,6 +798,9 @@ module.exports = {
                  max: GARDE_MAX, ställning: S.ställning, eskorter: S.eskorter,
                  banken_kupper: S.banken_kupper, indrivet: S.indrivet.length, materiel: S.materiel },
         bank: { mybanks: Math.round(S.mybanks), partner: S.partner, nekade_lån: S.nekade_lån, räder: S.räder },
+        lösenfond: { hotade: S.hotade, lösen: S.lösen, löst_kg: S.löst_kg,
+                     golv: LÖSEN_GOLV, kostnad_kg: LÖSEN_KG,
+                     kan_lösa: S.socker >= LÖSEN_GOLV + LÖSEN_KG },
         försörjning: { odling: S.odling, skörd_per_sats: +(ODLING_SKÖRD * (S.odling || 0)).toFixed(1),
                        odling_max: ODLING_MAX, odling_pris: ODLING_PRIS,
                        skördat: Math.round(S.skördat), återvunnet: Math.round(S.återvunnet),
@@ -690,7 +813,8 @@ module.exports = {
         silo_larm: SILO_LARM, kö_larm: KÖ_LARM, pris_larm: PRIS_LARM, pris_ropat: S.pris_ropat,
         logg: S.logg,
         räknare: S.räknare,
-        takt: { använt: postTider.length, egetTak: TAKT, serverTak: 6, väntar: väntar.map(v => v.typ) },
+        takt: { använt: postTider.length, egetTak: TAKT, serverTak: 6,
+                väntar: väntar.map(v => v.typ), kö_djup: väntar.length },
         leverans_om: Math.max(0, LEVERANS_SPÄRR - (nu - senasteLeverans)),
       });
     }
@@ -706,6 +830,15 @@ module.exports = {
         bok: S.gc.bok, skuld: S.gc.skuld, transaktioner: S.gc.transaktioner,
         jämförelse: { GodisCoin: 'täckt av godis, förtjänas av leverans', MyBanks: 'ges ut mot skuld till 49 % ränta' },
       });
+    }
+
+    // Lösenfonden, manuellt. En människa vid storskärmen kan lösa ut ett kvarter direkt.
+    if (req.method === 'POST' && (p === '/losen' || p === '/losen/')) {
+      framåt();
+      const kvarter = (url && url.searchParams.get('kvarter')) || '';
+      const r = lös(kvarter, board, true);
+      trösklar(board);
+      return svara(res, r, r.ok ? 200 : 409);
     }
 
     // Anlägg ett sockerbetfält. Betalas i socker — man såddar med det man har.
