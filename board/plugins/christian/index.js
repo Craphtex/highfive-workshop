@@ -7,6 +7,8 @@
 //   LYSSNAR: strömavbrott, elpris-steg (@lp) · kupp, jakt, överlämning (@willebus)
 //            minne-till-socker (@highfive) · kyrkogård (@team-jacob) · svar, godkänt (tanke-lagret)
 //            avfall, avslag, upplöst (vilket kvarter som helst — allmän lastkaj)
+//   SOCKERGARDET: fabrikens egen arm. Eskorterar lagret mot @willebus kupper och driver in
+//            råvara som ligger oförädlad på pulsen. Postar eskort, indrivning, styrkebesked.
 //   POSTAR:  socker-slut, lagret-plundrat, produktion, godis-klart, kö-vid-luckan, prishöjning,
 //            ransonering, socker-levererat
 //
@@ -33,6 +35,13 @@ const SATS_GODIS = 8;            // godis per sats
 const SILO_LARM = 15;            // under detta är det brist
 const KÖ_LARM = 8;               // över detta ropar vi på luckan
 const PRIS_LARM = 3;             // vi ropar först när priset dragit ifrån så mycket
+const GARDE_MAX = 100;           // gardets styrka
+const GARDE_FÖRLUST = 12;        // styrka som går åt när en eskort bryts
+const INDRIV_LARM = 8;           // kg innan en indrivning är värd en händelse
+const INDRIV_MAX = 5;            // hur mycket gardet orkar bära per vända
+// Råvarutyper gardet får hämta hem. Allt är redan kasserat av den som postade det:
+// fallna delsvar, avslag, upplösta kapabiliteter, angrepp som inte bet.
+const RÅVARA = { 'kyrkogård': 'grav', 'avslag': 'avslag', 'avfall': 'avfall', 'upplöst': 'upplöst', 'angrepp': 'angrepp' };
 const LEVERANS_SPÄRR = 20_000;   // människan får fylla silon en gång per 20 s
 const LOGG_MAX = 40;
 
@@ -51,6 +60,11 @@ const tomt = () => ({
   brist_ropad: false,
   kö_ropad: false,
   senast: Date.now(),
+  styrka: 40,                    // Sockergardets styrka 0..100
+  eskorter: [],                  // {när, mot, wanted, styrka, utfall}
+  indrivet: [],                  // händelse-id vi redan förädlat, så inget tas två gånger
+  banken_kupper: 0,              // kupper mot Banken vi sett — deras svaghet är vår styrka
+  ställning: 'rustad',
   kyrkogård_kg: 0,               // råvara från fallna delsvar sedan senaste utropet
   gravar: [],                    // {från, fitness, varför, kg, när}
   sats_namn: null,               // satsen heter det minne staden brände för att kunna koka den
@@ -130,6 +144,7 @@ function framåt() {
         S.godis += S.ransonering ? Math.round(SATS_GODIS / 2) : SATS_GODIS;
         S.satser++;
         S.räknare.satser++;
+        S.styrka = Math.min(GARDE_MAX, S.styrka + 1);
         S.band = 'kör';
       } else if (S.band !== 'sockerstopp') {
         S.band = 'sockerstopp';
@@ -164,6 +179,15 @@ function trösklar(board) {
     S.satser = 0;
   }
 
+  // Gardets ställning: bara vid byte, så det inte blir ett besked per händelse.
+  const ny_ställning = ställning();
+  if (ny_ställning !== S.ställning) {
+    S.ställning = ny_ställning;
+    logga(`gardets ställning: ${ny_ställning} (styrka ${S.styrka}, ${S.banken_kupper} kupper mot Banken)`);
+    begär('styrkebesked', () => ({ ställning: S.ställning, styrka: S.styrka, banken_kupper: S.banken_kupper }), undefined, board);
+  }
+
+  indriv(board);                  // gardet går ut och hämtar hem det som ligger oförädlat
   dränera(board);
   spara();
 }
@@ -185,6 +209,7 @@ function lastkaj(e, board, sort) {
   S.gravar.unshift({ sort, från: n.från || (d && d.från) || e.från, fitness: isFinite(fitness) ? fitness : null,
                      varför: kort(n.varför || n['varför det föll'] || n.skäl || '', 90), kg, när: Date.now() });
   S.gravar = S.gravar.slice(0, 8);
+  S.indrivet.push(e.id); S.indrivet = S.indrivet.slice(-400);
   logga(`${sort} från ${n.från || e.från} gav ${kg} kg: ${kort(n.varför || n.skäl || text, 60)}`, { orsak: e.id });
 
   if (S.kyrkogård_kg >= 20) {
@@ -192,6 +217,85 @@ function lastkaj(e, board, sort) {
                                  råvara: S.gravar.slice(0, 4).map(g => ({ sort: g.sort, från: g.från, kg: g.kg })),
                                  socker: S.socker }), e.id, board);
     S.kyrkogård_kg = 0;
+  }
+}
+
+// ---------- Sockergardet: fabrikens arm ----------
+// Två uppgifter. Den första är att eskortera lagret när @willebus slår till: gardets styrka
+// mot deras wanted, så deras egen siffra avgör utgången och vi inte bara vinner.
+// Den andra är indrivning: gardet går ut på pulsen och hämtar hem råvara som ligger
+// oförädlad. Allt det hämtar är redan kasserat av den som postade det — gardet tar inget
+// levande, det bär hem det staden redan lagt ifrån sig.
+
+function ställning() {
+  if (S.styrka >= 75) return 'överlägsen';
+  if (S.styrka >= 40) return 'rustad';
+  return 'svag';
+}
+
+// Eskort mot en kupp. EN händelse tillbaka, för ekospärren ger oss en reaktion per orsak.
+function eskortera(e, board) {
+  const wanted = Number((e.nyttolast && e.nyttolast.wanted) || 1);
+  const förare = (e.nyttolast && e.nyttolast.förare) || null;
+  const försvar = S.styrka / GARDE_MAX;
+  const angrepp = Math.min(1, wanted / 4);
+  const höll = försvar > angrepp;
+
+  S.eskorter.unshift({ när: Date.now(), mot: förare, wanted, styrka: S.styrka, utfall: höll ? 'avvärjd' : 'genombruten' });
+  S.eskorter = S.eskorter.slice(0, 6);
+
+  if (höll) {
+    S.styrka = Math.min(GARDE_MAX, S.styrka + 3);
+    logga(`gardet avvärjde kuppen (styrka ${S.styrka} mot wanted ${wanted})`, { orsak: e.id });
+    begär('eskort', () => ({ utfall: 'avvärjd', styrka: S.styrka, wanted, mot: förare,
+                             lager: S.godis, text: 'Sockergardet höll lastkajen' }), e.id, board);
+    return;
+  }
+
+  const taget = S.godis + Math.min(S.socker, 20);
+  S.godis = 0; S.socker = Math.max(0, S.socker - 20);
+  S.styrka = Math.max(0, S.styrka - GARDE_FÖRLUST);
+  S.räknare.plundringar++;
+  logga(`gardet bröts igenom: ${taget} enheter bort, styrka ${S.styrka}`, { orsak: e.id });
+  begär('lagret-plundrat', () => ({ plundrat: taget, kvar_socker: S.socker, kvar_godis: S.godis,
+                                    av: e.från, godis: S.sats_namn, gardet: 'genombrutet', styrka: S.styrka }), e.id, board);
+}
+
+// Indrivning: hämta hem råvara som ligger kvar på pulsen. Inget orsak-fält, för det är en
+// summering av många händelser — id:na ligger i nyttolasten så kedjan går att läsa ändå.
+function indriv(board) {
+  let puls;
+  try { puls = board.pulse(200); } catch { return; }
+  const tagna = new Set(S.indrivet);
+  const skörd = [];
+  let kg = 0;
+
+  for (const e of puls) {
+    if (skörd.length >= INDRIV_MAX) break;
+    const sort = RÅVARA[e.typ];
+    if (!sort || tagna.has(e.id) || e.från === 'christian') continue;
+    const n = e.nyttolast || {};
+    const d = n.delsvar;
+    const text = String((d && d.text) || n.text || n.hål || n.varför || '');
+    if (!text) continue;
+    const fitness = Number(n.fitness ?? n.sårbarhet ?? (d && d.fitness));
+    const vikt = Math.max(2, Math.min(25, Math.round(text.length / 12 * (1.4 - (isFinite(fitness) ? fitness : 0.5)))));
+    skörd.push({ id: e.id, sort, från: n.från || (d && d.från) || e.från, kg: vikt });
+    kg += vikt;
+    S.indrivet.push(e.id);
+  }
+  if (!skörd.length) return;
+  S.indrivet = S.indrivet.slice(-400);
+  S.socker += kg;
+  S.brist_ropad = false;
+  if (S.band === 'sockerstopp') S.band = 'kör';
+  for (const x of skörd) S.gravar.unshift({ sort: x.sort, från: x.från, fitness: null, varför: 'indriven av gardet', kg: x.kg, när: Date.now() });
+  S.gravar = S.gravar.slice(0, 8);
+  logga(`gardet drev in ${kg} kg från ${skörd.length} poster på pulsen`);
+
+  if (kg >= INDRIV_LARM) {
+    begär('indrivning', () => ({ kg, poster: skörd, styrka: S.styrka, socker: S.socker,
+                                 text: `Sockergardet bar hem ${kg} kg råvara som låg oförädlad` }), undefined, board);
   }
 }
 
@@ -231,14 +335,14 @@ const REAKTIONER = {
   'kupp': (e, board) => {
     const plats = String((e.nyttolast && e.nyttolast.plats) || '').toLowerCase();
     if (/godis|fabrik|torget/.test(plats)) {
-      const taget = S.godis + Math.min(S.socker, 20);
-      S.godis = 0; S.socker = Math.max(0, S.socker - 20);
-      S.räknare.plundringar++;
-      logga(`kupp mot fabriken: ${taget} enheter bort (${e.från})`, { orsak: e.id });
-      // Eget namn på rånet. Att kalla det socker-slut när det står 35 kg i silon är en lögn —
-      // socker-slut postas av trösklarna när silon faktiskt är tom.
-      begär('lagret-plundrat', () => ({ plundrat: taget, kvar_socker: S.socker, kvar_godis: S.godis, av: e.från, godis: S.sats_namn }), e.id, board);
-    } else {
+      return eskortera(e, board);           // gardet möter dem vid lastkajen
+    }
+    if (/bank/.test(plats)) {
+      S.banken_kupper++;
+      logga(`kupp mot Banken (${e.from || e.från}) — deras svaghet är vår styrka`, { orsak: e.id });
+      return;
+    }
+    {
       S.kö = Math.max(0, S.kö - 3);
       logga(`kupp i ${plats || 'stan'} — folk lämnade luckan för att titta`, { orsak: e.id });
     }
@@ -338,6 +442,8 @@ module.exports = {
         socker: S.socker, godis: S.godis, band: S.band, kö: S.kö, pris: S.pris,
         ransonering: S.ransonering, elpris: S.elpris,
         sats_namn: S.sats_namn, brända: S.brända, gravar: S.gravar, kyrkogård_kg: S.kyrkogård_kg,
+        garde: { styrka: S.styrka, max: GARDE_MAX, ställning: S.ställning, eskorter: S.eskorter,
+                 banken_kupper: S.banken_kupper, indrivet: S.indrivet.length },
         silo_larm: SILO_LARM, kö_larm: KÖ_LARM, pris_larm: PRIS_LARM, pris_ropat: S.pris_ropat,
         logg: S.logg,
         räknare: S.räknare,
