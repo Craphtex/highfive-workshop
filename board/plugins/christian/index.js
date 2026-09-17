@@ -113,10 +113,12 @@ const HOT = new Set(['inkasso', 'påminnelse', 'utmätning', 'uppköp', 'stadsö
 // Låg siffra går först.
 const PRIO = {
   'skuldlarm': 0, 'lösen': 0, 'motbud': 0,        // någon annan är på väg att förlora sitt kvarter
-  'eskort': 1, 'lagret-plundrat': 1,              // svar på ett annat kvarters handling
-  'socker-slut': 2, 'ransonering': 2, 'produktion': 2,
-  'godis-klart': 3, 'kö-vid-luckan': 3, 'prishöjning': 4, 'gc-bok': 4, 'styrkebesked': 4,
-  'socker-levererat': 4, 'rån': 1, 'indrivning': 3,
+  'eskort': 1, 'lagret-plundrat': 1, 'rån': 1,    // svar på ett annat kvarters handling
+  // Andra kvarter är BEROENDE av de här två: @zero-cools butik köper in på godis-klart och
+  // låter hyllpriset följa prishöjning. Då är de inte vårt småprat längre.
+  'godis-klart': 1, 'prishöjning': 2,
+  'socker-slut': 2, 'ransonering': 2, 'produktion': 3,
+  'kö-vid-luckan': 3, 'indrivning': 3, 'gc-bok': 4, 'styrkebesked': 4, 'socker-levererat': 4,
 };
 const prio = typ => (PRIO[typ] === undefined ? 3 : PRIO[typ]);
 const KÖ_MAX_ÅLDER = 120_000;    // en händelse som väntat så länge beskriver inte längre nuet
@@ -151,6 +153,7 @@ const tomt = () => ({
   reserv: 0,                     // godislager som överlever ett strömavbrott
   aggregat: false,               // reservkraft: kortare avbrott
   köhistoria: [],                // {när, kö} för att kunna visa toppen
+  grossist: { sålt: 0, inköp: 0, slutsålt: 0, senast: null },
   gratisskift: 0,                // satser kvar på @fusionens fria el
   förråd: {},                    // materiel i mothball: kostar ingen drift, ger ingen styrka
   skördat: 0, återvunnet: 0, bärgat: 0,
@@ -198,8 +201,16 @@ function logga(text, extra = {}) {
 function begär(typ, nyttolast, orsak, board, klar) {
   // Samma typ två gånger i kön är brus — den färskare vinner. Undantag: lösen och motbud
   // gäller olika kvarter varje gång och får inte skriva över varandra.
-  if (typ !== 'lösen' && typ !== 'motbud') väntar = väntar.filter(v => v.typ !== typ);
-  väntar.push({ typ, nyttolast, orsak, begärd: Date.now(), prio: prio(typ), klar });
+  // Den färskare nyttolasten vinner, men BEHOVET har väntat sedan den första begäran.
+  // Nollställdes begärd här svalt lägsta prioritet för alltid: posten byttes ut var tick,
+  // åldrades därför aldrig, och blev varken skickad eller slängd. Den låg bara sist i kön.
+  let sedan = Date.now();
+  if (typ !== 'lösen' && typ !== 'motbud') {
+    const gammal = väntar.find(v => v.typ === typ);
+    if (gammal) sedan = gammal.begärd;
+    väntar = väntar.filter(v => v.typ !== typ);
+  }
+  väntar.push({ typ, nyttolast, orsak, begärd: sedan, prio: prio(typ), klar });
   S.räknare.köade++;
   dränera(board);
 }
@@ -335,7 +346,12 @@ function trösklar(board) {
   if (S.kö < KÖ_LARM / 2) S.kö_ropad = false;
 
   if (S.satser >= 5 && S.godis > 0) {
-    begär('godis-klart', () => ({ lager: S.godis, satser: S.satser, ransonerat: S.ransonering, godis: S.sats_namn }), undefined, board);
+    // antal MÅSTE med: @zero-cools butik läser Number(n.antal ?? n.godis ?? n.sats) || 8
+    // (butiken.js rad 109). Vårt godis-fält är satsens NAMN, en sträng, så Number() gav NaN
+    // och butiken hyllade alltid 8 oavsett vad vi kokat. Med antal först stämmer det.
+    const sats_nu = S.ransonering ? Math.round(SATS_GODIS / 2) : SATS_GODIS;
+    begär('godis-klart', () => ({ antal: sats_nu, lager: S.godis, reserv: S.reserv,
+                                  satser: S.satser, ransonerat: S.ransonering, godis: S.sats_namn }), undefined, board);
     S.satser = 0;
   }
 
@@ -663,7 +679,10 @@ const REAKTIONER = {
       // revisionsanmärkning som namnger försöket och sänker kreditvärdigheten till 20.
       // Fältet är alltså ärlig valutamärkning, inte ett kryphål.
       const ropat_vid = S.pris;
-      begär('prishöjning', () => ({ pris: S.pris, från_pris: S.pris_ropat, varför: 'elpris',
+      // procent MÅSTE med: butiken läser Number(n.procent ?? n.höjning) || 10 (butiken.js
+      // rad 122) och antog annars alltid tio procent, oavsett vad priset gjort.
+      const procent = Math.round((S.pris / Math.max(1, S.pris_ropat) - 1) * 100);
+      begär('prishöjning', () => ({ pris: S.pris, från_pris: S.pris_ropat, procent, varför: 'elpris',
                                     elpris: kr, mybanks: S.pris, valuta: 'MyBanks' }), e.id, board,
             () => { S.pris_ropat = ropat_vid; });   // först när den gått ut på riktigt
     }
@@ -809,6 +828,37 @@ const REAKTIONER = {
     logga(`vädret: ${S.väder || 'okänt'} → skörden ×${S.väderfaktor}`, { orsak: e.id });
   },
 
+  // @zero-cools Bakdörren köper våra satser och säljer dem över disk. Det är en andra
+  // avsättningskanal: godis som går till butiken behöver inte expedieras i vår egen lucka.
+  // Vi tar det ur RESERVEN först och ur lagret bara om reserven inte räcker, så grossist-
+  // försäljningen aldrig förlänger kön vid vår egen lucka.
+  'inköp': (e) => {
+    const n = e.nyttolast || {};
+    if (n.till && n.till !== 'christian') return;
+    if (n.vara && n.vara !== 'godis') return;
+    const antal = Math.max(0, Number(n.antal) || 0);
+    if (!antal) return;
+    const ur_reserv = Math.min(S.reserv, antal);
+    S.reserv -= ur_reserv;
+    const kvar = antal - ur_reserv;
+    if (kvar > 0) S.godis = Math.max(0, S.godis - kvar);
+    S.grossist.sålt += antal;
+    S.grossist.inköp++;
+    S.grossist.senast = { när: Date.now(), antal, av: e.från, ur_reserv, ur_lager: kvar };
+    logga(`${e.från} köpte in ${antal} godis (${ur_reserv} ur reserven, ${kvar} ur lagret)`, { orsak: e.id });
+  },
+
+  // Butiken är slutsåld: det är en efterfrågesignal. Vi släpper reserven mot lagret så
+  // nästa sats blir klar fortare, i stället för att låta den ligga.
+  'slutsålt': (e) => {
+    const n = e.nyttolast || {};
+    if (n.vara && n.vara !== 'godis') return;
+    S.grossist.slutsålt++;
+    const fram = Math.min(S.reserv, 12);
+    S.reserv -= fram; S.godis += fram;
+    logga(`${e.från} är slutsåld på godis (${n.sålt_totalt ?? '?'} totalt) — släpper ${fram} ur reserven`, { orsak: e.id });
+  },
+
   'jakt': (e) => { S.kö = Math.max(0, S.kö - 2); logga('sirener utanför, kön skingrades', { orsak: e.id }); },
   'överlämning': (e) => { S.kö += 1; logga('jakten drog vidare, folk kom tillbaka', { orsak: e.id }); },
 
@@ -900,6 +950,7 @@ module.exports = {
         tavelnamn: 'Christian',
         socker: S.socker, godis: S.godis, band: S.band, kö: S.kö, pris: S.pris,
         ransonering: S.ransonering, elpris: S.elpris,
+        grossist: S.grossist,
         lucka: { luckor: S.luckor, expedierar: LUCKA_EXP * (S.luckor || 1), max: LUCKA_MAX,
                  pris: LUCKA_PRIS, reserv: S.reserv, reserv_tak: RESERV_TAK,
                  aggregat: S.aggregat, aggregat_pris: AGGREGAT_PRIS },

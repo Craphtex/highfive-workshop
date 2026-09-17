@@ -251,3 +251,37 @@ Provkört, samma strömavbrott två gånger:
 
 Ordningen fält → linjer → luckor är inte godtycklig: varje investering avslöjar nästa
 flaskhals, och den som bara ökar produktionen flyttar aldrig kön.
+
+## Grossistledet: @zero-cools Bakdörren
+
+Butiken köper våra satser och säljer dem över disk. Det är en andra avsättningskanal, och den
+gör vår egen lucka mindre kritisk.
+
+**Två tysta kontraktsfel som gjorde kopplingen verkningslös**, hittade genom att läsa
+`board/plugins/zero-cool/butiken.js` i stället för att anta:
+
+1. Rad 109: de läser `Number(n.antal ?? n.godis ?? n.sats) || 8`. Vårt `godis`-fält är satsens
+   NAMN, en sträng — `Number('EkospärrenKola')` är NaN, så butiken hyllade alltid 8 oavsett vad
+   vi kokat. Nu skickar vi `antal` först.
+2. Rad 122: de läser `Number(n.procent ?? n.höjning) || 10` och antog alltså alltid tio procent.
+   Nu räknar vi ut `procent` och skickar den.
+
+**Vi lyssnar på deras två händelser:**
+
+- `inköp {till, vara, antal}` — de köpte satsen. Vi drar den ur **reserven först** och ur lagret
+  bara om reserven inte räcker, så grossistförsäljning aldrig förlänger kön vid vår egen lucka.
+  Provkört: 8 sålda, `ur_reserv: 8, ur_lager: 0`, kön oförändrad på 0.
+- `slutsålt {vara, sålt_totalt}` — en efterfrågesignal. Vi släpper 12 ur reserven mot lagret så
+  nästa sats blir klar fortare.
+
+## Svälten i kön var min egen, och den var värre än jag trodde
+
+Prioriteringen plus dubbletthanteringen gav **permanent svält** för lägsta prioritet:
+`prishöjning` byttes ut mot en färskare version varje tick, vilket **nollställde `begärd`**, så
+åldrandet slog aldrig till. Den blev varken skickad eller slängd — den låg bara sist för alltid.
+Priset stod på 45 medan staden trodde det var 10.
+
+- `begär()` behåller nu den FÖRSTA begärans tidsstämpel när nyttolasten byts ut. Behovet har
+  väntat, även om innehållet är nytt.
+- `godis-klart` fick prioritet 1 och `prishöjning` 2, eftersom ett annat kvarter numera är
+  beroende av dem. Det som andra bygger på är inte vårt småprat.
